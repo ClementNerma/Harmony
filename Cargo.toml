@@ -1,0 +1,2 @@
+[workspace]
+members = ["harmony-client", "harmony-server", "harmony-differ"]
