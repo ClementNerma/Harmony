@@ -80,14 +80,14 @@ pub async fn snapshot(
         snapshot_options,
     } = payload;
 
-    let mut open_syncs = state.open_syncs.write().await;
+    let mut slots = state.slots.write().await;
 
-    let open_syncs = open_syncs
+    let slot = slots
         .get_mut(&slot_name)
         .context("Provided slot was not found")
         .map_err(handle_err!(NOT_FOUND))?;
 
-    if open_syncs.is_some() {
+    if slot.open_sync.is_some() {
         throw_err!(
             FORBIDDEN,
             "A synchronization is already opened for the provided slot"
@@ -97,7 +97,7 @@ pub async fn snapshot(
     let paths = state.paths.read().await;
 
     make_snapshot(
-        paths.slot_content_dir(&slot_name),
+        paths.slot_content_dir(&slot.infos),
         |_| {},
         &snapshot_options,
     )
@@ -124,35 +124,35 @@ pub async fn begin_sync(
 ) -> HttpResult<Json<SyncInfos>> {
     let BeginSyncParams { slot_name, diff } = begin_sync_params;
 
-    let mut open_syncs = state.open_syncs.write().await;
+    let mut slots = state.slots.write().await;
 
-    let open_syncs = open_syncs
+    let slot = slots
         .get_mut(&slot_name)
         .context("Provided slot was not found")
         .map_err(handle_err!(NOT_FOUND))?;
 
-    if open_syncs.is_some() {
+    if slot.open_sync.is_some() {
         throw_err!(
             FORBIDDEN,
             "A synchronization is already opened for the provided slot"
         );
     }
 
-    let open_sync = open_syncs.insert(OpenSync::new(diff)?);
+    let open_sync = slot.open_sync.insert(OpenSync::new(diff)?);
 
     let paths = state.paths.read().await;
 
-    fs::create_dir(paths.slot_transfer_dir(&slot_name, &open_sync.sync_token))
+    fs::create_dir(paths.slot_transfer_dir(&slot.infos, &open_sync.sync_token))
         .await
         .context("Failed to create the synchronization directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    fs::create_dir(paths.slot_pending_dir(&slot_name, &open_sync.sync_token))
+    fs::create_dir(paths.slot_pending_dir(&slot.infos, &open_sync.sync_token))
         .await
         .context("Failed to create the pending transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    fs::create_dir(paths.slot_completion_dir(&slot_name, &open_sync.sync_token))
+    fs::create_dir(paths.slot_completion_dir(&slot.infos, &open_sync.sync_token))
         .await
         .context("Failed to create the complete transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
@@ -182,12 +182,14 @@ pub async fn finalize_sync(
         sync_token,
     } = payload;
 
-    let mut open_syncs = state.open_syncs.write().await;
-    let open_sync = open_syncs.get_mut(&slot_name);
-
-    let open_sync = open_sync
+    let mut slots = state.slots.write().await;
+    let slot = slots
+        .get_mut(&slot_name)
         .context("Provided slot was not found")
-        .map_err(handle_err!(NOT_FOUND))?
+        .map_err(handle_err!(NOT_FOUND))?;
+
+    let open_sync = slot
+        .open_sync
         .as_mut()
         .context("No synchronization is currently open for this slot")
         .map_err(handle_err!(NOT_FOUND))?;
@@ -200,7 +202,7 @@ pub async fn finalize_sync(
     }
 
     let paths = state.paths.read().await;
-    let complete_dir = paths.slot_completion_dir(&slot_name, &open_sync.sync_token);
+    let complete_dir = paths.slot_completion_dir(&slot.infos, &open_sync.sync_token);
 
     for (relative_path, (id, _)) in &open_sync.files {
         if !complete_dir.join(id).is_file() {
@@ -213,7 +215,7 @@ pub async fn finalize_sync(
 
     // TODO: add option to backup type changed + deleted items in original directory to compressed archive (or do a full complete backup?)
 
-    let slot_files_dir = paths.slot_content_dir(&slot_name);
+    let slot_files_dir = paths.slot_content_dir(&slot.infos);
 
     for relative_path in &open_sync.diff_ops.create_dirs {
         fs::create_dir(slot_files_dir.join(relative_path))
@@ -243,7 +245,7 @@ pub async fn finalize_sync(
             .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
     }
 
-    fs::remove_dir(paths.slot_pending_dir(&slot_name, &open_sync.sync_token))
+    fs::remove_dir(paths.slot_pending_dir(&slot.infos, &open_sync.sync_token))
         .await
         .context("Failed to remove the pending transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
@@ -253,12 +255,12 @@ pub async fn finalize_sync(
         .context("Failed to remove the complete transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    fs::remove_dir(paths.slot_transfer_dir(&slot_name, &open_sync.sync_token))
+    fs::remove_dir(paths.slot_transfer_dir(&slot.infos, &open_sync.sync_token))
         .await
         .context("Failed to remove the slot directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    open_syncs.insert(slot_name, None);
+    slot.open_sync = None;
 
     Ok(Json(()))
 }
@@ -283,13 +285,15 @@ pub async fn send_file(
 
     // This block contains quick, locking computing
     // After this block we can do the actual transfer without worrying about locking a concurrent request
-    let (tmp_path, file_id, metadata) = {
-        let open_syncs = state.open_syncs.read().await;
-        let open_sync = open_syncs.get(&slot_name);
-
-        let open_sync = open_sync
+    let (tmp_path, file_id, metadata, slot) = {
+        let slots = state.slots.read().await;
+        let slot = slots
+            .get(&slot_name)
             .context("Provided slot was not found")
-            .map_err(handle_err!(NOT_FOUND))?
+            .map_err(handle_err!(NOT_FOUND))?;
+
+        let open_sync = slot
+            .open_sync
             .as_ref()
             .context("No synchronization is currently open for this slot")
             .map_err(handle_err!(NOT_FOUND))?;
@@ -311,10 +315,10 @@ pub async fn send_file(
             .paths
             .read()
             .await
-            .slot_pending_dir(&slot_name, &sync_token)
+            .slot_pending_dir(&slot.infos, &sync_token)
             .join(file_id);
 
-        (tmp_path, file_id.clone(), *metadata)
+        (tmp_path, file_id.clone(), *metadata, slot.infos.clone())
     };
 
     let mut tmp_file = File::create(&tmp_path)
@@ -367,7 +371,7 @@ pub async fn send_file(
         .paths
         .read()
         .await
-        .slot_completion_dir(&slot_name, &sync_token)
+        .slot_completion_dir(&slot, &sync_token)
         .join(file_id);
 
     fs::rename(&tmp_path, &completed_path)

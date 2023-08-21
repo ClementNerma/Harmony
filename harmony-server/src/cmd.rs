@@ -3,6 +3,8 @@ use std::{net::IpAddr, path::PathBuf};
 use clap::Parser;
 use log::LevelFilter;
 
+use crate::paths::SlotInfos;
+
 #[derive(Parser)]
 pub struct Args {
     #[clap(short, long, help = "Synchronization directory")]
@@ -30,7 +32,7 @@ pub struct HttpArgs {
 #[derive(clap::Args)]
 pub struct BackupArgs {
     #[clap(short, long, help = "List of available slots")]
-    pub slots: Vec<String>,
+    pub slots: Vec<SlotInfos>,
 
     #[clap(long, help = "The secret password")]
     pub secret: String,

@@ -8,7 +8,7 @@ use tokio::sync::RwLock;
 use crate::{
     cmd::BackupArgs,
     data::{generate_id, AppData},
-    paths::{is_relative_linear_path, Paths},
+    paths::{is_relative_linear_path, Paths, SlotInfos},
     throw_err,
 };
 
@@ -19,22 +19,36 @@ pub struct HttpState {
     pub backup_args: Arc<RwLock<BackupArgs>>,
     pub paths: Arc<RwLock<Paths>>,
     pub app_data: Arc<RwLock<AppData>>,
-    pub open_syncs: Arc<RwLock<HashMap<String, Option<OpenSync>>>>,
+    pub slots: Arc<RwLock<HashMap<String, SlotSync>>>,
 }
 
 impl HttpState {
     pub fn new(args: BackupArgs, app_data: AppData, paths: Paths) -> Self {
         Self {
-            open_syncs: Arc::new(RwLock::new(
+            slots: Arc::new(RwLock::new(
                 args.slots
                     .iter()
-                    .map(|slot| (slot.to_owned(), None))
+                    .map(|slot| (slot.name().to_owned(), SlotSync::new(slot.clone())))
                     .collect(),
             )),
 
             backup_args: Arc::new(RwLock::new(args)),
             paths: Arc::new(RwLock::new(paths)),
             app_data: Arc::new(RwLock::new(app_data)),
+        }
+    }
+}
+
+pub struct SlotSync {
+    pub infos: SlotInfos,
+    pub open_sync: Option<OpenSync>,
+}
+
+impl SlotSync {
+    fn new(infos: SlotInfos) -> Self {
+        Self {
+            infos,
+            open_sync: None,
         }
     }
 }

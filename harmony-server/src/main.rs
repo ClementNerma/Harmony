@@ -58,8 +58,8 @@ async fn inner_main(args: Args) -> Result<()> {
         bail!("Please provide at least one backup slot");
     }
 
-    for slot_name in &backup_args.slots {
-        let slot_dir = paths.slot_root_dir(slot_name);
+    for slot in &backup_args.slots {
+        let slot_dir = paths.slot_root_dir(slot);
 
         if !slot_dir.is_dir() {
             fs::create_dir_all(&slot_dir).await.with_context(|| {
@@ -70,7 +70,7 @@ async fn inner_main(args: Args) -> Result<()> {
             })?;
         }
 
-        let slot_files_dir = paths.slot_content_dir(slot_name);
+        let slot_files_dir = paths.slot_content_dir(slot);
 
         if !slot_files_dir.is_dir() {
             fs::create_dir_all(&slot_files_dir).await.with_context(|| {
@@ -81,7 +81,7 @@ async fn inner_main(args: Args) -> Result<()> {
             })?;
         }
 
-        info!("Slot {} is ready", slot_name.bright_blue());
+        info!("Slot {} is ready", slot.name().bright_blue());
     }
 
     http::launch(http_args, backup_args, app_data, paths).await
