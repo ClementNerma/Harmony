@@ -211,7 +211,7 @@ pub async fn finalize_sync(
         }
     }
 
-    // TODO: backup type changed + deleted items in original directory to compressed archive (or do a full complete backup?)
+    // TODO: add option to backup type changed + deleted items in original directory to compressed archive (or do a full complete backup?)
 
     let slot_files_dir = paths.slot_content_dir(&slot_name);
 
