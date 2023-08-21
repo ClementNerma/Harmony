@@ -396,10 +396,6 @@ async fn inner_main() -> Result<()> {
         max_parallel_transfers.unwrap_or_else(|| std::cmp::min(num_cpus::get(), 8));
 
     for (relative_path, _) in transfer_file_ids {
-        while task_pool.len() > max_parallel_transfers {
-            task_pool.join_next().await.unwrap()?;
-        }
-
         let data_dir = data_dir.clone();
 
         let errors = Arc::clone(&errors);
@@ -441,6 +437,10 @@ async fn inner_main() -> Result<()> {
                 let relative_path = relative_path.clone();
 
                 // Send file
+                while task_pool.len() >= max_parallel_transfers {
+                    task_pool.join_next().await.unwrap()?;
+                }
+
                 task_pool.spawn(async move {
                     let req = request_url::<()>(url, &access_token, |client| {
                         client.query(&query).body(file_body)
