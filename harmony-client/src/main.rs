@@ -144,13 +144,13 @@ async fn inner_main() -> Result<()> {
         ))
     )?;
 
-    for msg in local.debug {
-        debug!("[snapshot:local] {msg}");
-    }
+    // for msg in local.debug {
+    //     debug!("[snapshot:local] {msg}");
+    // }
 
-    for msg in remote.debug {
-        debug!("[snapshot:remote] {msg}");
-    }
+    // for msg in remote.debug {
+    //     debug!("[snapshot:remote] {msg}");
+    // }
 
     // ======================================================= //
     // =

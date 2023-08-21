@@ -112,7 +112,6 @@ impl SnapshotOptions {
 #[derive(Serialize, Deserialize)]
 pub struct SnapshotResult {
     pub snapshot: Snapshot,
-    pub debug: Vec<String>,
 }
 
 pub async fn make_snapshot(
@@ -124,9 +123,6 @@ pub async fn make_snapshot(
 
     let total = Arc::new(Mutex::new(AtomicUsize::new(0)));
     let progress = Arc::new(RwLock::new(progress));
-
-    // TODO: use debug
-    let debug = vec![];
 
     let mut items = Vec::new();
 
@@ -173,7 +169,6 @@ pub async fn make_snapshot(
             from_dir: from_dir_str.to_string(),
             items,
         },
-        debug,
     })
 }
 
