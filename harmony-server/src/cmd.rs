@@ -31,12 +31,12 @@ pub struct HttpArgs {
 
 #[derive(clap::Args)]
 pub struct BackupArgs {
-    #[clap(short, long, help = "List of available slots")]
+    #[clap(
+        long,
+        help = "List of available slots. If you use a ':' separator you can then specify the directory where data should be stored."
+    )]
     pub slots: Vec<SlotInfos>,
 
-    #[clap(long, help = "The secret password")]
+    #[clap(short, long, help = "The secret password")]
     pub secret: String,
-
-    #[clap(short, long, help = "Number of backups to keep", default_value = "5")]
-    pub backups_limit: usize,
 }
