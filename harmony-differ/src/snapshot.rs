@@ -71,7 +71,7 @@ impl SnapshotOptions {
         Ok(())
     }
 
-    pub fn should_ignore(&self, path: &Path, from_dir: &Path) -> bool {
+    pub fn should_ignore(&self, path: &Path, from_dir: &Path) -> Result<bool> {
         let relative_path = path.strip_prefix(from_dir).unwrap();
 
         if self
@@ -79,7 +79,7 @@ impl SnapshotOptions {
             .iter()
             .any(|c| relative_path.strip_prefix(c).is_ok())
         {
-            return true;
+            return Ok(true);
         }
 
         if self.ignore_names.iter().any(|c| {
@@ -87,19 +87,25 @@ impl SnapshotOptions {
                 .components()
                 .any(|component| component.as_os_str() == OsStr::new(c))
         }) {
-            return true;
+            return Ok(true);
         }
 
-        // TODO: handle is_file metadata errors
-        if path.is_file() {
+        let mt = path.metadata().with_context(|| {
+            format!(
+                "Failed to get metadata for path: {}",
+                relative_path.display()
+            )
+        })?;
+
+        if mt.is_file() {
             if let Some(ext) = relative_path.extension() {
                 if self.ignore_exts.iter().any(|c| OsStr::new(c) == ext) {
-                    return true;
+                    return Ok(true);
                 }
             }
         }
 
-        false
+        Ok(false)
     }
 }
 
@@ -124,13 +130,14 @@ pub async fn make_snapshot(
 
     let mut items = Vec::new();
 
-    let walker = WalkDir::new(&from_dir)
-        .min_depth(1)
-        .into_iter()
-        .filter_entry(|entry| !options.should_ignore(entry.path(), &from_dir));
+    let walker = WalkDir::new(&from_dir).min_depth(1).into_iter();
 
     for item in walker {
         let item = item.context("Failed to analyze directory entry")?;
+
+        if options.should_ignore(item.path(), &from_dir)? {
+            continue;
+        }
 
         let from = from_dir.clone();
 
