@@ -9,6 +9,7 @@ clap = { version = "4.3.19", features = ["derive"] }
 colored = "2.0.4"
 dialoguer = { version = "0.10.4", default-features = false }
 futures-util = { version = "0.3.28", default-features = false }
+gethostname = "0.4.3"
 harmony-differ = { version = "0.1.0", path = "../harmony-differ" }
 indicatif = "0.17.5"
 reqwest = { version = "0.11.18", features = ["json", "stream", "multipart"] }

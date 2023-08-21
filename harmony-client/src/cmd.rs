@@ -14,9 +14,7 @@ pub struct Args {
     pub server_secret: String,
 
     #[clap(long, help = "Device name")]
-    // TODO: make it optional and allow to get the OS' one or fallback to generating
-    // a random name
-    pub device_name: String,
+    pub device_name: Option<String>,
 
     #[clap(long, help = "Slot name to use")]
     pub slot_name: String,

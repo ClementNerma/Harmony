@@ -19,6 +19,7 @@ use cmd::Args;
 use colored::Colorize;
 use dialoguer::Confirm;
 use futures_util::TryStreamExt;
+use gethostname::gethostname;
 use harmony_differ::{
     diffing::{Diff, DiffItemModified},
     snapshot::{
@@ -81,6 +82,8 @@ async fn inner_main() -> Result<()> {
 
     // TODO: store the access token
     debug!("Requesting access token...");
+
+    let device_name = device_name.unwrap_or_else(|| gethostname().to_string_lossy().into_owned());
 
     let access_token = request_url::<String>(url.join("request-access-token")?, "-", |client| {
         client.json(&json!({
