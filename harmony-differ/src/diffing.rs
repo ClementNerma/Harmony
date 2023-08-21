@@ -264,8 +264,7 @@ impl DiffApplyOps {
     }
 }
 
-// TODO: optimize
 fn sort_rev_in_place<T: Ord>(mut vec: Vec<T>) -> Vec<T> {
-    vec.sort();
-    vec.into_iter().rev().collect()
+    vec.sort_by(|a, b| b.cmp(a));
+    vec
 }

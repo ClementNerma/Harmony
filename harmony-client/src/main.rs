@@ -377,13 +377,12 @@ async fn inner_main() -> Result<()> {
 
             errors.push($err);
 
-            $pb_msg.read().await.set_message(format!(
-                "Running... (encountered {} error(s))", // \n{}
+            let pb = $pb_msg.read().await;
+
+            pb.println($err);
+            pb.set_message(format!(
+                "Running... (encountered {} error(s))",
                 errors.len(),
-                // errors
-                //     .iter()
-                //     .map(|err| format!("\n* {err}"))
-                //     .collect::<String>()
             ));
         }};
     }

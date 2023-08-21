@@ -96,10 +96,14 @@ pub async fn snapshot(
 
     let paths = state.paths.read().await;
 
-    make_snapshot(paths.slot_files_dir(&slot_name), |_| {}, &snapshot_options)
-        .await
-        .map(Json)
-        .map_err(handle_err!(INTERNAL_SERVER_ERROR))
+    make_snapshot(
+        paths.slot_content_dir(&slot_name),
+        |_| {},
+        &snapshot_options,
+    )
+    .await
+    .map(Json)
+    .map_err(handle_err!(INTERNAL_SERVER_ERROR))
 }
 
 #[derive(Deserialize)]
@@ -138,17 +142,17 @@ pub async fn begin_sync(
 
     let paths = state.paths.read().await;
 
-    fs::create_dir(paths.slot_open_sync_dir(&slot_name, &open_sync.sync_token))
+    fs::create_dir(paths.slot_transfer_dir(&slot_name, &open_sync.sync_token))
         .await
         .context("Failed to create the synchronization directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    fs::create_dir(paths.slot_opened_sync_pending_dir(&slot_name, &open_sync.sync_token))
+    fs::create_dir(paths.slot_pending_dir(&slot_name, &open_sync.sync_token))
         .await
         .context("Failed to create the pending transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    fs::create_dir(paths.slot_opened_sync_complete_dir(&slot_name, &open_sync.sync_token))
+    fs::create_dir(paths.slot_completion_dir(&slot_name, &open_sync.sync_token))
         .await
         .context("Failed to create the complete transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
@@ -196,7 +200,7 @@ pub async fn finalize_sync(
     }
 
     let paths = state.paths.read().await;
-    let complete_dir = paths.slot_opened_sync_complete_dir(&slot_name, &open_sync.sync_token);
+    let complete_dir = paths.slot_completion_dir(&slot_name, &open_sync.sync_token);
 
     for (relative_path, (id, _)) in &open_sync.files {
         if !complete_dir.join(id).is_file() {
@@ -209,7 +213,7 @@ pub async fn finalize_sync(
 
     // TODO: backup type changed + deleted items in original directory to compressed archive (or do a full complete backup?)
 
-    let slot_files_dir = paths.slot_files_dir(&slot_name);
+    let slot_files_dir = paths.slot_content_dir(&slot_name);
 
     for relative_path in &open_sync.diff_ops.create_dirs {
         fs::create_dir(slot_files_dir.join(relative_path))
@@ -239,7 +243,7 @@ pub async fn finalize_sync(
             .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
     }
 
-    fs::remove_dir(paths.slot_opened_sync_pending_dir(&slot_name, &open_sync.sync_token))
+    fs::remove_dir(paths.slot_pending_dir(&slot_name, &open_sync.sync_token))
         .await
         .context("Failed to remove the pending transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
@@ -249,7 +253,7 @@ pub async fn finalize_sync(
         .context("Failed to remove the complete transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    fs::remove_dir(paths.slot_open_sync_dir(&slot_name, &open_sync.sync_token))
+    fs::remove_dir(paths.slot_transfer_dir(&slot_name, &open_sync.sync_token))
         .await
         .context("Failed to remove the slot directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
@@ -307,7 +311,7 @@ pub async fn send_file(
             .paths
             .read()
             .await
-            .slot_opened_sync_pending_dir(&slot_name, &sync_token)
+            .slot_pending_dir(&slot_name, &sync_token)
             .join(file_id);
 
         (tmp_path, file_id.clone(), *metadata)
@@ -363,7 +367,7 @@ pub async fn send_file(
         .paths
         .read()
         .await
-        .slot_opened_sync_complete_dir(&slot_name, &sync_token)
+        .slot_completion_dir(&slot_name, &sync_token)
         .join(file_id);
 
     fs::rename(&tmp_path, &completed_path)

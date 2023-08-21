@@ -17,26 +17,26 @@ impl Paths {
         self.data_dir.join("state.json")
     }
 
-    pub fn slot_dir(&self, slot_name: &str) -> PathBuf {
+    pub fn slot_root_dir(&self, slot_name: &str) -> PathBuf {
         self.data_dir.join("slots").join(slot_name)
     }
 
-    pub fn slot_files_dir(&self, slot_name: &str) -> PathBuf {
-        self.slot_dir(slot_name).join("content")
+    pub fn slot_content_dir(&self, slot_name: &str) -> PathBuf {
+        self.slot_root_dir(slot_name).join("content")
     }
 
-    pub fn slot_open_sync_dir(&self, slot_name: &str, sync_token: &str) -> PathBuf {
-        self.slot_dir(slot_name)
+    pub fn slot_transfer_dir(&self, slot_name: &str, sync_token: &str) -> PathBuf {
+        self.slot_root_dir(slot_name)
             .join(format!("opened-sync-{sync_token}"))
     }
 
-    pub fn slot_opened_sync_complete_dir(&self, slot_name: &str, sync_token: &str) -> PathBuf {
-        self.slot_open_sync_dir(slot_name, sync_token)
+    pub fn slot_completion_dir(&self, slot_name: &str, sync_token: &str) -> PathBuf {
+        self.slot_transfer_dir(slot_name, sync_token)
             .join("complete")
     }
 
-    pub fn slot_opened_sync_pending_dir(&self, slot_name: &str, sync_token: &str) -> PathBuf {
-        self.slot_open_sync_dir(slot_name, sync_token)
+    pub fn slot_pending_dir(&self, slot_name: &str, sync_token: &str) -> PathBuf {
+        self.slot_transfer_dir(slot_name, sync_token)
             .join("pending")
     }
 }
