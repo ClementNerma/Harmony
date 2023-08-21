@@ -80,30 +80,33 @@ pub async fn snapshot(
         snapshot_options,
     } = payload;
 
-    let mut slots = state.slots.write().await;
+    // This block contains quick, locking computing
+    // After this block we can do the actual transfer without worrying about locking a concurrent request
+    let path = {
+        let slot = state
+            .slots
+            .get(&slot_name)
+            .context("Provided slot was not found")
+            .map_err(handle_err!(NOT_FOUND))?
+            .read()
+            .await;
 
-    let slot = slots
-        .get_mut(&slot_name)
-        .context("Provided slot was not found")
-        .map_err(handle_err!(NOT_FOUND))?;
+        if slot.open_sync.is_some() {
+            throw_err!(
+                FORBIDDEN,
+                "A synchronization is already opened for the provided slot"
+            );
+        }
 
-    if slot.open_sync.is_some() {
-        throw_err!(
-            FORBIDDEN,
-            "A synchronization is already opened for the provided slot"
-        );
-    }
+        let paths = state.paths.read().await;
 
-    let paths = state.paths.read().await;
+        paths.slot_content_dir(&slot.infos)
+    };
 
-    make_snapshot(
-        paths.slot_content_dir(&slot.infos),
-        |_| {},
-        &snapshot_options,
-    )
-    .await
-    .map(Json)
-    .map_err(handle_err!(INTERNAL_SERVER_ERROR))
+    make_snapshot(path, |_| {}, &snapshot_options)
+        .await
+        .map(Json)
+        .map_err(handle_err!(INTERNAL_SERVER_ERROR))
 }
 
 #[derive(Deserialize)]
@@ -124,12 +127,13 @@ pub async fn begin_sync(
 ) -> HttpResult<Json<SyncInfos>> {
     let BeginSyncParams { slot_name, diff } = begin_sync_params;
 
-    let mut slots = state.slots.write().await;
-
-    let slot = slots
-        .get_mut(&slot_name)
+    let mut slot = state
+        .slots
+        .get(&slot_name)
         .context("Provided slot was not found")
-        .map_err(handle_err!(NOT_FOUND))?;
+        .map_err(handle_err!(NOT_FOUND))?
+        .write()
+        .await;
 
     if slot.open_sync.is_some() {
         throw_err!(
@@ -138,7 +142,10 @@ pub async fn begin_sync(
         );
     }
 
-    let open_sync = slot.open_sync.insert(OpenSync::new(diff)?);
+    slot.open_sync = Some(OpenSync::new(diff)?);
+
+    // Required as using .insert() makes the compiler think we have a mutable borrow here, even when doing &*
+    let open_sync = slot.open_sync.as_ref().unwrap();
 
     let paths = state.paths.read().await;
 
@@ -182,15 +189,19 @@ pub async fn finalize_sync(
         sync_token,
     } = payload;
 
-    let mut slots = state.slots.write().await;
-    let slot = slots
-        .get_mut(&slot_name)
+    let mut slot = state
+        .slots
+        .get(&slot_name)
         .context("Provided slot was not found")
-        .map_err(handle_err!(NOT_FOUND))?;
+        .map_err(handle_err!(NOT_FOUND))?
+        // Getting an exclusive access right now is very important as it ensures that no
+        // other finalization process can happen simultaneously, which could be destructive
+        .write()
+        .await;
 
     let open_sync = slot
         .open_sync
-        .as_mut()
+        .as_ref()
         .context("No synchronization is currently open for this slot")
         .map_err(handle_err!(NOT_FOUND))?;
 
@@ -286,11 +297,13 @@ pub async fn send_file(
     // This block contains quick, locking computing
     // After this block we can do the actual transfer without worrying about locking a concurrent request
     let (tmp_path, file_id, metadata, slot) = {
-        let slots = state.slots.read().await;
-        let slot = slots
+        let slot = state
+            .slots
             .get(&slot_name)
             .context("Provided slot was not found")
-            .map_err(handle_err!(NOT_FOUND))?;
+            .map_err(handle_err!(NOT_FOUND))?
+            .read()
+            .await;
 
         let open_sync = slot
             .open_sync

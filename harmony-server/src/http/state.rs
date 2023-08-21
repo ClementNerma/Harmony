@@ -19,18 +19,23 @@ pub struct HttpState {
     pub backup_args: Arc<RwLock<BackupArgs>>,
     pub paths: Arc<RwLock<Paths>>,
     pub app_data: Arc<RwLock<AppData>>,
-    pub slots: Arc<RwLock<HashMap<String, SlotSync>>>,
+    pub slots: Arc<HashMap<String, RwLock<SlotSync>>>,
 }
 
 impl HttpState {
     pub fn new(args: BackupArgs, app_data: AppData, paths: Paths) -> Self {
         Self {
-            slots: Arc::new(RwLock::new(
+            slots: Arc::new(
                 args.slots
                     .iter()
-                    .map(|slot| (slot.name().to_owned(), SlotSync::new(slot.clone())))
+                    .map(|slot| {
+                        (
+                            slot.name().to_owned(),
+                            RwLock::new(SlotSync::new(slot.clone())),
+                        )
+                    })
                     .collect(),
-            )),
+            ),
 
             backup_args: Arc::new(RwLock::new(args)),
             paths: Arc::new(RwLock::new(paths)),
