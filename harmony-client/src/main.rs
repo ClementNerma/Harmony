@@ -392,6 +392,9 @@ async fn inner_main() -> Result<()> {
 
     let mut task_pool = JoinSet::new();
 
+    let max_parallel_transfers =
+        max_parallel_transfers.unwrap_or_else(|| std::cmp::min(num_cpus::get(), 8));
+
     for (relative_path, _) in transfer_file_ids {
         while task_pool.len() > max_parallel_transfers {
             task_pool.join_next().await.unwrap()?;

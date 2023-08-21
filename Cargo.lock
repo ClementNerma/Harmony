@@ -585,6 +585,7 @@ dependencies = [
  "gethostname",
  "harmony-differ",
  "indicatif",
+ "num_cpus",
  "reqwest",
  "serde",
  "serde_json",

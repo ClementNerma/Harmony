@@ -22,10 +22,9 @@ pub struct Args {
     #[clap(
         short,
         long,
-        help = "Maximum number of parallel transfers (default: 8)",
-        default_value = "8"
+        help = "Maximum number of parallel transfers (default: smaller between CPU cores and 8)"
     )]
-    pub max_parallel_transfers: usize,
+    pub max_parallel_transfers: Option<usize>,
 
     #[clap(
         short,
