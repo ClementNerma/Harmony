@@ -1,5 +1,6 @@
+use anyhow::{bail, Result};
+
 use std::{
-    convert::Infallible,
     path::{Path, PathBuf},
     str::FromStr,
 };
@@ -56,17 +57,42 @@ pub struct SlotInfos {
 }
 
 impl SlotInfos {
-    pub fn parse(input: &str) -> Self {
-        match input.find(':') {
-            Some(sep) => Self {
-                name: input[0..sep].to_owned(),
-                linked: Some(PathBuf::from(&input[sep + 1..])),
-            },
+    pub fn new(name: String, linked: Option<PathBuf>) -> Result<Self> {
+        if name.trim().is_empty() {
+            bail!("Slot name cannot be empty");
+        }
 
-            None => Self {
-                name: input.to_owned(),
-                linked: None,
-            },
+        for fc in FORBIDDEN_CHARS {
+            if name.contains(*fc) {
+                bail!("Character {fc:?} is forbidden");
+            }
+        }
+
+        if let Some(ref linked) = linked {
+            if !linked.has_root() {
+                bail!("Path linking requires a root path");
+            }
+
+            if linked.iter().any(|c| c == ".") {
+                bail!("Current dir components '.' are forbidden in linked paths");
+            }
+
+            if linked.iter().any(|c| c == "..") {
+                bail!("Parent dir components '..' are forbidden in linked paths");
+            }
+        }
+
+        Ok(Self { name, linked })
+    }
+
+    pub fn parse(input: &str) -> Result<Self> {
+        match input.find(':') {
+            Some(sep) => Self::new(
+                input[0..sep].to_owned(),
+                Some(PathBuf::from(&input[sep + 1..])),
+            ),
+
+            None => Self::new(input.to_owned(), None),
         }
     }
 
@@ -80,9 +106,13 @@ impl SlotInfos {
 }
 
 impl FromStr for SlotInfos {
-    type Err = Infallible;
+    type Err = anyhow::Error;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        Ok(Self::parse(input))
+        Self::parse(input)
     }
 }
+
+static FORBIDDEN_CHARS: &[char] = &[
+    '/', '\\', '<', '>', ':', '"', '|', '?', '*', '\r', '\n', '\x00',
+];
