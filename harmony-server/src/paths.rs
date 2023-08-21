@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub struct Paths {
     data_dir: PathBuf,
@@ -39,4 +39,8 @@ impl Paths {
         self.slot_transfer_dir(slot_name, sync_token)
             .join("pending")
     }
+}
+
+pub fn is_relative_linear_path(path: &Path) -> bool {
+    path.has_root() || path.iter().any(|c| c == "." || c == "..")
 }

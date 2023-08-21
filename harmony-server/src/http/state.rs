@@ -2,13 +2,14 @@ use harmony_differ::{
     diffing::{Diff, DiffApplyOps},
     snapshot::SnapshotFileMetadata,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc};
 use tokio::sync::RwLock;
 
 use crate::{
     cmd::BackupArgs,
     data::{generate_id, AppData},
-    paths::Paths,
+    paths::{is_relative_linear_path, Paths},
+    throw_err,
 };
 
 use super::errors::HttpResult;
@@ -55,10 +56,13 @@ impl OpenSync {
                 .send_files
                 .into_iter()
                 .map(|(relative_path, mt)| {
-                    // TODO: validate path (must not try to go up)
-                    (relative_path, (generate_id(), mt))
+                    if is_relative_linear_path(Path::new(&relative_path)) {
+                        throw_err!(BAD_REQUEST, format!("Path is trying to escape or contains '.' / '..' components: {relative_path}"));
+                    }
+
+                    Ok((relative_path, (generate_id(), mt)))
                 })
-                .collect(),
+                .collect::<Result<_, _>>()?,
             diff_ops: diff.ops(),
             diff,
         })
