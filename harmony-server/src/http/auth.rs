@@ -22,13 +22,9 @@ pub async fn auth_middleware<B>(
 }
 
 async fn authenticate(bearer_token: &str, state: &HttpState) -> Result<(), HttpError> {
-    let state = state.app_data.read().await;
+    let mut state = state.app_data.write().await;
 
-    if !state
-        .access_tokens
-        .iter()
-        .any(|c| c.token() == bearer_token)
-    {
+    if state.get_access_token(bearer_token).is_none() {
         throw_err!(FORBIDDEN, "Invalid access token provided");
     }
 

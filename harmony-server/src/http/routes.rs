@@ -18,7 +18,7 @@ use tokio::{
     io::AsyncWriteExt,
 };
 
-use crate::{data::AccessToken, handle_err, throw_err};
+use crate::{handle_err, throw_err};
 
 use super::{
     errors::HttpResult,
@@ -53,9 +53,7 @@ pub async fn request_access_token(
         throw_err!(BAD_REQUEST, "Invalid secret password provided");
     }
 
-    let access_token = AccessToken::new(device_name);
-
-    app_data.access_tokens.push(access_token.clone());
+    let access_token = app_data.create_access_token(device_name).clone();
 
     if let Err(err) = app_data.save(&app_data_file).await {
         error!("Failed to save data file: {err:?}");

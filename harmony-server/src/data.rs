@@ -7,7 +7,7 @@ use tokio::fs;
 
 #[derive(Serialize, Deserialize)]
 pub struct AppData {
-    pub access_tokens: Vec<AccessToken>,
+    access_tokens: Vec<AccessToken>,
 }
 
 impl AppData {
@@ -35,6 +35,17 @@ impl AppData {
             .await
             .context("Failed to write app data to file")
     }
+
+    pub fn create_access_token(&mut self, device_name: String) -> &AccessToken {
+        self.access_tokens.push(AccessToken::new(device_name));
+        self.access_tokens.last().unwrap()
+    }
+
+    pub fn get_access_token(&mut self, token: &str) -> Option<&AccessToken> {
+        let access_token = self.access_tokens.iter_mut().find(|c| c.token == token)?;
+        access_token.last_use = SystemTime::now();
+        Some(access_token)
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -42,14 +53,18 @@ pub struct AccessToken {
     device_name: String,
     token: String,
     created_at: SystemTime,
+    last_use: SystemTime,
 }
 
 impl AccessToken {
     pub fn new(device_name: String) -> Self {
+        let now = SystemTime::now();
+
         Self {
             device_name,
             token: generate_id(),
-            created_at: SystemTime::now(),
+            created_at: now,
+            last_use: now,
         }
     }
 
