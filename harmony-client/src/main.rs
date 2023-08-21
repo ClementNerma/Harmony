@@ -533,7 +533,7 @@ async fn request_url<T: DeserializeOwned>(
     let text = res
         .text()
         .await
-        .context("Failed to get HTTP response body as JSON")?;
+        .context("Failed to get HTTP response body as text")?;
 
     let res = serde_json::from_str::<T>(&text).with_context(|| {
         format!(
