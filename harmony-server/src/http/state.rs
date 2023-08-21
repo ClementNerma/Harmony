@@ -19,6 +19,14 @@ pub struct HttpState {
     pub backup_args: Arc<RwLock<BackupArgs>>,
     pub paths: Arc<RwLock<Paths>>,
     pub app_data: Arc<RwLock<AppData>>,
+
+    // This is kind of a weird type, huh?
+    // Basically, the HashMap is built when the state is, and never changes afterwards
+    // Only the values itself may have *inner* mutations, which means we can just wrap the
+    // HashMap into an Arc and call it a day!
+    // The individual values then have a RwLock on them to provide safe inner mutability
+    // This allows to access multiple slots in writing mode at the same time, without compromising
+    // on safety nor performance (as there is only one locking process overall).
     pub slots: Arc<HashMap<String, RwLock<SlotSync>>>,
 }
 
