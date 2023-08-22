@@ -104,7 +104,7 @@ async fn inner_main() -> Result<()> {
 
     info!("Building snapshots...");
 
-    let snapshot_optoins = SnapshotOptions {
+    let snapshot_options = SnapshotOptions {
         ignore_paths: ignore_items
             .iter()
             .filter(|item| Path::new(item).is_absolute())
@@ -132,14 +132,14 @@ async fn inner_main() -> Result<()> {
         async_with_spinner(local_pb, |pb| make_snapshot(
             data_dir.clone(),
             pb,
-            &snapshot_optoins
+            &snapshot_options
         )),
         async_with_spinner(remote_pb, |_| request_url::<SnapshotResult>(
             url.join("snapshot").unwrap(),
             &access_token,
             |client| client.json(&json!({
                 "slot_name": slot_name,
-                "snapshot_options": snapshot_optoins,
+                "snapshot_options": snapshot_options,
             }))
         ))
     )?;
