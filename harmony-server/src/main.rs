@@ -11,6 +11,9 @@ use log::{debug, error, info};
 use paths::Paths;
 use tokio::fs;
 
+// Vendor OpenSSL inside the binary to avoid dependencies problem
+use openssl as _;
+
 mod cmd;
 mod data;
 mod http;
