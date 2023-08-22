@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use walkdir::WalkDir;
 
 use crate::filter::FallibleEntryFilter;
@@ -124,7 +124,7 @@ pub async fn make_snapshot(
     options.validate()?;
 
     let total = Arc::new(Mutex::new(AtomicUsize::new(0)));
-    let progress = Arc::new(RwLock::new(progress));
+    let progress = Arc::new(progress);
 
     let mut items = Vec::new();
 
@@ -157,7 +157,7 @@ pub async fn make_snapshot(
             .fetch_add(1, std::sync::atomic::Ordering::Release)
             + 1;
 
-        (progress.read().await)(format!("Analyzed {total} item(s)"));
+        progress(format!("Analyzed {total} item(s)"));
     }
 
     let from_dir_str = from_dir.to_str().with_context(|| {
