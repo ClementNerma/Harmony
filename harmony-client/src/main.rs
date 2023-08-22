@@ -22,9 +22,7 @@ use futures_util::TryStreamExt;
 use gethostname::gethostname;
 use harmony_differ::{
     diffing::{Diff, DiffItemModified},
-    snapshot::{
-        make_snapshot, SnapshotFileMetadata, SnapshotItemMetadata, SnapshotOptions, SnapshotResult,
-    },
+    snapshot::{make_snapshot, SnapshotItemMetadata, SnapshotOptions, SnapshotResult},
 };
 use indicatif::{HumanBytes, MultiProgress, ProgressBar, ProgressStyle};
 use reqwest::{Body, Client, IntoUrl, RequestBuilder, Url};
@@ -161,7 +159,8 @@ async fn inner_main() -> Result<()> {
 
     info!("Diffing...");
 
-    let diff = Diff::build(&local.snapshot, &remote.snapshot);
+    let diff = Diff::build(&local.snapshot, &remote.snapshot)
+        .apply_time_granularity(Duration::from_secs(1));
 
     let Diff {
         added,
@@ -169,30 +168,6 @@ async fn inner_main() -> Result<()> {
         type_changed,
         deleted,
     } = &diff;
-
-    let modified = modified
-    .iter()
-        .filter(|(path, DiffItemModified { prev, new })| {
-            let SnapshotFileMetadata {
-                size,
-                last_modif_date,
-                last_modif_date_ns: _,
-            } = new;
-
-            if *size != prev.size {
-                return true;
-            }
-
-            let truncated_timestamp_diff = last_modif_date.abs_diff(prev.last_modif_date);
-
-            if truncated_timestamp_diff <= 1 {
-                debug!("Ignoring modified item '{path}' as modification time is no more than 2 seconds.");
-                false
-            } else {
-                true
-            }
-        })
-        .collect::<Vec<_>>();
 
     if added.is_empty() && modified.is_empty() && type_changed.is_empty() && deleted.is_empty() {
         success!("Nothing to do!");
@@ -221,19 +196,19 @@ async fn inner_main() -> Result<()> {
     if !modified.is_empty() {
         info!("Modified:");
 
-        for (path, DiffItemModified { prev, new }) in &modified {
+        for (path, DiffItemModified { prev, new }) in modified {
             let how = if prev.size != new.size {
                 format!("({} => {})", HumanBytes(prev.size), HumanBytes(new.size))
-            } else if prev.last_modif_date != new.last_modif_date
+            } else if prev.last_modif_date_s != new.last_modif_date_s
                 || prev.last_modif_date_ns != new.last_modif_date_ns
             {
                 let prev =
-                    OffsetDateTime::from_unix_timestamp(prev.last_modif_date.try_into().unwrap())
+                    OffsetDateTime::from_unix_timestamp(prev.last_modif_date_s.try_into().unwrap())
                         .unwrap()
                         + Duration::from_nanos(prev.last_modif_date_ns.into());
 
                 let new =
-                    OffsetDateTime::from_unix_timestamp(new.last_modif_date.try_into().unwrap())
+                    OffsetDateTime::from_unix_timestamp(new.last_modif_date_s.try_into().unwrap())
                         .unwrap()
                         + Duration::from_nanos(new.last_modif_date_ns.into());
 

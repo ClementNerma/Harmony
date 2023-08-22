@@ -1,6 +1,9 @@
 use crate::snapshot::{Snapshot, SnapshotFileMetadata, SnapshotItem, SnapshotItemMetadata};
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -121,6 +124,40 @@ impl Diff {
         diff.sort_by(|a, b| a.path.cmp(&b.path));
 
         Self::new(diff)
+    }
+
+    pub fn apply_time_granularity(mut self, time_granularity: Duration) -> Self {
+        self.modified = self
+            .modified
+            .into_iter()
+            .filter(|(_, DiffItemModified { prev, new })| {
+                // Destructuring isn't necessary, but it allows us to ensure we are correctly using every single field of the metadata
+                let SnapshotFileMetadata {
+                    size,
+                    last_modif_date_s,
+                    last_modif_date_ns,
+                } = new;
+
+                if *size != prev.size {
+                    return true;
+                }
+
+                let new_modified_at = Duration::from_secs(*last_modif_date_s)
+                    + Duration::from_nanos((*last_modif_date_ns).into());
+
+                let prev_modified_at = Duration::from_secs(prev.last_modif_date_s)
+                    + Duration::from_nanos(prev.last_modif_date_ns.into());
+
+                let diff_abs = new_modified_at
+                    .checked_sub(prev_modified_at)
+                    .or_else(|| prev_modified_at.checked_sub(new_modified_at))
+                    .unwrap();
+
+                diff_abs <= time_granularity
+            })
+            .collect();
+
+        self
     }
 
     pub fn ops(&self) -> DiffApplyOps {

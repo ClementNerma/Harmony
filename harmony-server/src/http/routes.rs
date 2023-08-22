@@ -351,7 +351,7 @@ pub async fn send_file(
     }
 
     let SnapshotFileMetadata {
-        last_modif_date,
+        last_modif_date_s,
         last_modif_date_ns,
         size,
     } = metadata;
@@ -368,7 +368,7 @@ pub async fn send_file(
     tokio::task::spawn_blocking(move || {
         filetime::set_file_mtime(
             tmp_path_bis,
-            FileTime::from_unix_time(last_modif_date as i64, last_modif_date_ns),
+            FileTime::from_unix_time(last_modif_date_s as i64, last_modif_date_ns),
         )
         .context("Failed to set modification time")
     })

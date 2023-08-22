@@ -33,7 +33,7 @@ pub enum SnapshotItemMetadata {
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct SnapshotFileMetadata {
     pub size: u64,
-    pub last_modif_date: u64,
+    pub last_modif_date_s: u64,
     pub last_modif_date_ns: u32,
 }
 
@@ -203,7 +203,7 @@ async fn snapshot_item(item: &Path, from: &Path) -> Result<SnapshotItem> {
 
         SnapshotItemMetadata::File(SnapshotFileMetadata {
             size: metadata.len(),
-            last_modif_date: mtime.as_secs(),
+            last_modif_date_s: mtime.as_secs(),
             last_modif_date_ns: mtime.subsec_nanos(),
         })
     } else {
