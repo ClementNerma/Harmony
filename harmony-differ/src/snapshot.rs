@@ -12,32 +12,32 @@ use walkdir::WalkDir;
 
 use crate::filter::FallibleEntryFilter;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Snapshot {
     pub from_dir: String,
     pub items: Vec<SnapshotItem>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct SnapshotItem {
     pub relative_path: String,
     pub metadata: SnapshotItemMetadata,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub enum SnapshotItemMetadata {
     Directory,
     File(SnapshotFileMetadata),
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SnapshotFileMetadata {
     pub size: u64,
     pub last_modif_date_s: u64,
     pub last_modif_date_ns: u32,
 }
 
-#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct SnapshotOptions {
     pub ignore_paths: Vec<String>,
     pub ignore_names: Vec<String>,
@@ -111,7 +111,7 @@ impl SnapshotOptions {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct SnapshotResult {
     pub snapshot: Snapshot,
 }

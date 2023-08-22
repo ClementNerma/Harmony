@@ -153,7 +153,7 @@ impl Diff {
                     .or_else(|| prev_modified_at.checked_sub(new_modified_at))
                     .unwrap();
 
-                diff_abs <= time_granularity
+                diff_abs >= time_granularity
             })
             .collect();
 
