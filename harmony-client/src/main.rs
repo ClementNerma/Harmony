@@ -52,7 +52,7 @@ async fn main() {
 async fn inner_main() -> Result<()> {
     let Args {
         data_dir,
-        server_address: address,
+        address,
         server_secret,
         device_name,
         slot_name,

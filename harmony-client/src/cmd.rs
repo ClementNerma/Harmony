@@ -4,13 +4,13 @@ use clap::Parser;
 
 #[derive(Parser)]
 pub struct Args {
-    #[clap(help = "Path to the data directory")]
+    #[clap(short, long, help = "Path to the data directory")]
     pub data_dir: PathBuf,
 
-    #[clap(long, long, help = "Address of the server to contact")]
-    pub server_address: String,
+    #[clap(short, long, long, help = "Address of the server")]
+    pub address: String,
 
-    #[clap(long, help = "Server's secret password")]
+    #[clap(short, long, help = "Server's secret password")]
     pub server_secret: String,
 
     #[clap(long, help = "Device name")]
