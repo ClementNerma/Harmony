@@ -68,7 +68,7 @@ async fn inner_main(args: Args) -> Result<()> {
             fs::create_dir_all(&slot_dir).await.with_context(|| {
                 format!(
                     "Failed to create slot data directory at: {}",
-                    slot_dir.display()
+                    slot_dir.to_string_lossy().bright_magenta()
                 )
             })?;
         }
@@ -79,9 +79,19 @@ async fn inner_main(args: Args) -> Result<()> {
             fs::create_dir_all(&slot_files_dir).await.with_context(|| {
                 format!(
                     "Failed to create slot content directory at: {}",
-                    slot_files_dir.display()
+                    slot_files_dir.to_string_lossy().bright_magenta()
                 )
             })?;
+        }
+
+        if let Some(linked_dir) = slot.linked() {
+            if !linked_dir.is_dir() {
+                bail!(
+                    "Provided linked directory ({}) was not found for slot '{}'",
+                    linked_dir.to_string_lossy().bright_magenta(),
+                    slot.name().bright_blue()
+                );
+            }
         }
 
         info!("Slot {} is ready", slot.name().bright_blue());
