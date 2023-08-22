@@ -10,14 +10,17 @@ pub struct Args {
     #[clap(short, long, long, help = "Address of the server")]
     pub address: String,
 
-    #[clap(short, long, help = "Server's secret password")]
+    #[clap(long, help = "Server's secret password")]
     pub server_secret: String,
+
+    #[clap(short, long, help = "Slot name to use")]
+    pub slot_name: String,
 
     #[clap(long, help = "Device name")]
     pub device_name: Option<String>,
 
-    #[clap(long, help = "Slot name to use")]
-    pub slot_name: String,
+    #[clap(long, help = "Perform a dry run")]
+    pub dry_run: bool,
 
     #[clap(
         short,

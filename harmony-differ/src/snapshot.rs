@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use walkdir::WalkDir;
 
+use crate::filter::FallibleEntryFilter;
+
 #[derive(Serialize, Deserialize)]
 pub struct Snapshot {
     pub from_dir: String,
@@ -126,14 +128,15 @@ pub async fn make_snapshot(
 
     let mut items = Vec::new();
 
-    let walker = WalkDir::new(&from_dir).min_depth(1).into_iter();
+    let walker = WalkDir::new(&from_dir).min_depth(1);
+    let walker_with_ignores = FallibleEntryFilter::new(walker, |entry| {
+        options
+            .should_ignore(entry.path(), &from_dir)
+            .map(|ignore| !ignore)
+    });
 
-    for item in walker {
-        let item = item.context("Failed to analyze directory entry")?;
-
-        if options.should_ignore(item.path(), &from_dir)? {
-            continue;
-        }
+    for item in walker_with_ignores {
+        let item = item.context("Failed to analyze directory entry")??;
 
         let from = from_dir.clone();
 

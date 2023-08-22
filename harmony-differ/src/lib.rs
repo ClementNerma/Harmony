@@ -3,4 +3,5 @@
 #![warn(unused_crate_dependencies)]
 
 pub mod diffing;
+mod filter;
 pub mod snapshot;
