@@ -56,6 +56,7 @@ async fn inner_main() -> Result<()> {
         server_secret,
         device_name,
         slot_name,
+        dry_run,
         verbose,
         max_parallel_transfers,
         ignore_items,
@@ -308,6 +309,11 @@ async fn inner_main() -> Result<()> {
         )
         .bright_yellow()
     );
+
+    if dry_run {
+        info!("Dry run completed.");
+        std::process::exit(0);
+    }
 
     let confirm = Confirm::new()
         .with_prompt("Continue?".bright_blue().to_string())
