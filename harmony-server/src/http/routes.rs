@@ -147,23 +147,23 @@ pub async fn begin_sync(
 
     let paths = state.paths.read().await;
 
-    fs::create_dir(paths.slot_transfer_dir(&slot.infos, &open_sync.sync_token))
+    fs::create_dir(paths.slot_transfer_dir(&slot.infos, &open_sync.id))
         .await
         .context("Failed to create the synchronization directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    fs::create_dir(paths.slot_pending_dir(&slot.infos, &open_sync.sync_token))
+    fs::create_dir(paths.slot_pending_dir(&slot.infos, &open_sync.id))
         .await
         .context("Failed to create the pending transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    fs::create_dir(paths.slot_completion_dir(&slot.infos, &open_sync.sync_token))
+    fs::create_dir(paths.slot_completion_dir(&slot.infos, &open_sync.id))
         .await
         .context("Failed to create the complete transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
     Ok(Json(SyncInfos {
-        sync_token: open_sync.sync_token.to_owned(),
+        sync_token: open_sync.token.to_owned(),
         transfer_file_ids: open_sync
             .files
             .iter()
@@ -203,7 +203,7 @@ pub async fn finalize_sync(
         .context("No synchronization is currently open for this slot")
         .map_err(handle_err!(NOT_FOUND))?;
 
-    if open_sync.sync_token != sync_token {
+    if open_sync.token != sync_token {
         throw_err!(
             BAD_REQUEST,
             "Provided synchronization token does not match currently open sync."
@@ -211,7 +211,7 @@ pub async fn finalize_sync(
     }
 
     let paths = state.paths.read().await;
-    let complete_dir = paths.slot_completion_dir(&slot.infos, &open_sync.sync_token);
+    let complete_dir = paths.slot_completion_dir(&slot.infos, &open_sync.id);
 
     for (relative_path, (id, _)) in &open_sync.files {
         if !complete_dir.join(id).is_file() {
@@ -254,7 +254,7 @@ pub async fn finalize_sync(
             .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
     }
 
-    fs::remove_dir(paths.slot_pending_dir(&slot.infos, &open_sync.sync_token))
+    fs::remove_dir(paths.slot_pending_dir(&slot.infos, &open_sync.id))
         .await
         .context("Failed to remove the pending transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
@@ -264,7 +264,7 @@ pub async fn finalize_sync(
         .context("Failed to remove the complete transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    fs::remove_dir(paths.slot_transfer_dir(&slot.infos, &open_sync.sync_token))
+    fs::remove_dir(paths.slot_transfer_dir(&slot.infos, &open_sync.id))
         .await
         .context("Failed to remove the slot directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
@@ -309,7 +309,7 @@ pub async fn send_file(
             .context("No synchronization is currently open for this slot")
             .map_err(handle_err!(NOT_FOUND))?;
 
-        if open_sync.sync_token != sync_token {
+        if open_sync.token != sync_token {
             throw_err!(
                 BAD_REQUEST,
                 "Provided synchronization token does not match currently open sync."
@@ -400,8 +400,12 @@ pub async fn send_file(
     Ok(Json(()))
 }
 
+// TODO: route to check if a sync. is pending
 // TODO: route to change the access token of an open sync (not the inner token as it's in the dir path!) to resume a pending sync
 //       => removes everything in the temporary directory and returns only the subset of files to transfer given what's in "completed"
 // TODO: route to forcefully close sync (removes temp. dirs)
 // TODO: route to forcefully remove pending file (removes the file)
 // TODO: route to read a file
+
+// TODO: client will first check if a sync. is pending => if so, ask the client for confirmation, if confirm, resume the open sync
+//       if not pending => begin a normal synchronization

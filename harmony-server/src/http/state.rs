@@ -67,7 +67,8 @@ impl SlotSync {
 }
 
 pub struct OpenSync {
-    pub sync_token: String,
+    pub id: String,
+    pub token: String,
     pub diff: Diff,
     pub diff_ops: DiffApplyOps,
     pub files: HashMap<String, (String, SnapshotFileMetadata)>,
@@ -78,7 +79,8 @@ impl OpenSync {
         let diff_ops = diff.ops();
 
         Ok(Self {
-            sync_token: generate_id(),
+            id: generate_id(),
+            token: generate_id(),
             files: diff_ops
                 .send_files
                 .into_iter()
@@ -93,5 +95,11 @@ impl OpenSync {
             diff_ops: diff.ops(),
             diff,
         })
+    }
+
+    pub fn regenerate_access_token(&mut self) -> String {
+        let id = generate_id();
+        self.token = id.clone();
+        id
     }
 }
