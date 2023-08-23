@@ -29,12 +29,7 @@ use reqwest::{Body, Client, IntoUrl, RequestBuilder, Url};
 use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::json;
 use time::OffsetDateTime;
-use tokio::{
-    fs::File,
-    sync::{Mutex, RwLock},
-    task::JoinSet,
-    try_join,
-};
+use tokio::{fs::File, sync::Mutex, task::JoinSet, try_join};
 use tokio_util::codec::{BytesCodec, Decoder};
 
 use crate::logging::PRINT_DEBUG_MESSAGES;
@@ -151,15 +146,15 @@ async fn inner_main() -> Result<()> {
 
     let mp = MultiProgress::new();
 
-    let pb_msg = Arc::new(RwLock::new(
+    let pb_msg = Arc::new(
         mp.add(
             ProgressBar::new(1)
                 .with_style(ProgressStyle::with_template("{msg}").unwrap())
                 .with_message("Running..."),
         ),
-    ));
+    );
 
-    let transfer_pb = Arc::new(RwLock::new(
+    let transfer_pb = Arc::new(
         mp.add(
             ProgressBar::new(transfer_file_ids.len() as u64).with_style(
                 ProgressStyle::with_template(
@@ -168,9 +163,9 @@ async fn inner_main() -> Result<()> {
                 .unwrap(),
             ),
         ),
-    ));
+    );
 
-    let transfer_size_pb = Arc::new(RwLock::new(
+    let transfer_size_pb = Arc::new(
         mp.add(
             ProgressBar::new(transfer_size).with_style(
                 ProgressStyle::with_template(
@@ -179,20 +174,18 @@ async fn inner_main() -> Result<()> {
                 .unwrap(),
             ),
         )
-    ));
+    );
 
     let errors = Arc::new(Mutex::new(vec![]));
 
     macro_rules! report_err {
-        ($err: expr, $errors: expr, $pb_msg: expr) => {{
+        ($err: expr, $errors: expr, $pb: expr) => {{
             let mut errors = $errors.lock().await;
 
             errors.push($err);
 
-            let pb = $pb_msg.read().await;
-
-            pb.println(format!("{}", $err).bright_red().to_string());
-            pb.set_message(format!(
+            $pb.println(format!("{}", $err).bright_red().to_string());
+            $pb.set_message(format!(
                 "Running... (encountered {} error(s))",
                 errors.len(),
             ));
@@ -211,7 +204,7 @@ async fn inner_main() -> Result<()> {
         let pb_msg = Arc::clone(&pb_msg);
         let transfer_size_pb = Arc::clone(&transfer_size_pb);
 
-        transfer_pb.read().await.inc(1);
+        transfer_pb.inc(1);
 
         match File::open(data_dir.join(&relative_path)).await {
             Err(err) => {
@@ -230,7 +223,7 @@ async fn inner_main() -> Result<()> {
                     let transfer_size_pb = Arc::clone(&transfer_size_pb);
 
                     tokio::spawn(async move {
-                        transfer_size_pb.read().await.inc(size);
+                        transfer_size_pb.inc(size);
                     });
                 });
 
@@ -271,8 +264,8 @@ async fn inner_main() -> Result<()> {
         result?;
     }
 
-    transfer_pb.write().await.finish_and_clear();
-    transfer_size_pb.write().await.finish_and_clear();
+    transfer_pb.finish_and_clear();
+    transfer_size_pb.finish_and_clear();
 
     // ======================================================= //
     // =
