@@ -333,10 +333,10 @@ pub async fn send_file(
     };
 
     if tmp_path.is_file() {
-        throw_err!(
-            BAD_REQUEST,
-            "The provided file is already being transferred!"
-        );
+        fs::remove_file(&tmp_path)
+            .await
+            .context("Temporary file already exists but it could not be deleted")
+            .map_err(handle_err!(BAD_REQUEST))?;
     }
 
     let mut tmp_file = File::create(&tmp_path)
@@ -400,6 +400,8 @@ pub async fn send_file(
     Ok(Json(()))
 }
 
+// TODO: route to change the access token of an open sync (not the inner token as it's in the dir path!) to resume a pending sync
+//       => removes everything in the temporary directory and returns only the subset of files to transfer given what's in "completed"
 // TODO: route to forcefully close sync (removes temp. dirs)
 // TODO: route to forcefully remove pending file (removes the file)
 // TODO: route to read a file
