@@ -136,10 +136,7 @@ pub async fn begin_sync(
         );
     }
 
-    slot.open_sync = Some(OpenSync::new(diff)?);
-
-    // Required as using .insert() makes the compiler think we have a mutable borrow here, even when doing &*
-    let open_sync = slot.open_sync.as_ref().unwrap();
+    let open_sync = OpenSync::new(diff)?;
 
     fs::create_dir(state.paths.slot_transfer_dir(&slot.infos, &open_sync.id))
         .await
@@ -156,20 +153,43 @@ pub async fn begin_sync(
         .context("Failed to create the complete transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    Ok(Json(SyncInfos {
+    let slot_files_dir = state.paths.slot_content_dir(&slot.infos);
+
+    for relative_path in &open_sync.diff_ops.delete_files {
+        fs::remove_file(slot_files_dir.join(relative_path))
+            .await
+            .with_context(|| format!("Failed to remove file at '{relative_path}'"))
+            .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
+    }
+
+    for relative_path in &open_sync.diff_ops.delete_empty_dirs {
+        fs::remove_dir(slot_files_dir.join(relative_path))
+            .await
+            .with_context(|| format!("Failed to remove directory at '{relative_path}'"))
+            .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
+    }
+
+    let sync_infos = SyncInfos {
         sync_token: open_sync.token.to_owned(),
+
         transfer_file_ids: open_sync
             .files
             .iter()
             .map(|(id, (relative_path, _))| (id.clone(), relative_path.clone()))
             .collect(),
+
         tranfer_size: open_sync
             .diff_ops
             .send_files
             .iter()
             .map(|(_, mt)| mt.size)
             .sum(),
-    }))
+    };
+
+    // This must come last, otherwise we have a begin synchronization even if we didn't go to the end of its preparation
+    slot.open_sync = Some(open_sync);
+
+    Ok(Json(sync_infos))
 }
 
 #[derive(Deserialize)]
@@ -291,7 +311,7 @@ pub async fn finalize_sync(
         .context("Provided slot was not found")
         .map_err(handle_err!(NOT_FOUND))?
         // Getting an exclusive access right now is very important as it ensures that no
-        // other finalization process can happen simultaneously, which could be destructive
+        // other finalization process can happen simultaneously, which would be destructive
         .write()
         .await;
 
@@ -311,15 +331,25 @@ pub async fn finalize_sync(
     let complete_dir = state.paths.slot_completion_dir(&slot.infos, &open_sync.id);
 
     for (relative_path, (id, _)) in &open_sync.files {
-        if !complete_dir.join(id).is_file() {
+        let marker_path = complete_dir.join(id);
+
+        if !marker_path.is_file() {
             throw_err!(
                 BAD_REQUEST,
                 format!("File '{relative_path}' has not been transferred yet!")
             );
         }
-    }
 
-    // TODO: add option to backup type changed + deleted items in original directory to compressed archive (or do a full complete backup?)
+        fs::remove_file(&marker_path)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to remove marker file at '{}'",
+                    marker_path.display()
+                )
+            })
+            .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
+    }
 
     let slot_files_dir = state.paths.slot_content_dir(&slot.infos);
 
@@ -327,27 +357,6 @@ pub async fn finalize_sync(
         fs::create_dir(slot_files_dir.join(relative_path))
             .await
             .with_context(|| format!("Failed to create folder at '{relative_path}'"))
-            .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
-    }
-
-    for relative_path in &open_sync.diff_ops.delete_files {
-        fs::remove_file(slot_files_dir.join(relative_path))
-            .await
-            .with_context(|| format!("Failed to remove file at '{relative_path}'"))
-            .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
-    }
-
-    for relative_path in &open_sync.diff_ops.delete_empty_dirs {
-        fs::remove_dir(slot_files_dir.join(relative_path))
-            .await
-            .with_context(|| format!("Failed to remove directory at '{relative_path}'"))
-            .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
-    }
-
-    for (relative_path, (id, _)) in &open_sync.files {
-        fs::rename(complete_dir.join(id), slot_files_dir.join(relative_path))
-            .await
-            .with_context(|| format!("Failed to move complete file '{relative_path}'"))
             .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
     }
 
@@ -374,7 +383,7 @@ pub async fn finalize_sync(
 #[derive(Deserialize)]
 pub struct SendFileParams {
     slot_name: String,
-    sync_token: String,
+    sync_id: String,
     path: String,
 }
 
@@ -385,13 +394,13 @@ pub async fn send_file(
 ) -> HttpResult<Json<()>> {
     let SendFileParams {
         slot_name,
-        sync_token,
+        sync_id,
         path,
     } = params;
 
     // This block contains quick, locking computing
     // After this block we can do the actual transfer without worrying about locking a concurrent request
-    let (tmp_path, file_id, metadata, slot) = {
+    let (tmp_path, file_id, metadata, slot_infos) = {
         let slot = state
             .slots
             .get(&slot_name)
@@ -406,7 +415,7 @@ pub async fn send_file(
             .context("No synchronization is currently open for this slot")
             .map_err(handle_err!(NOT_FOUND))?;
 
-        if open_sync.token != sync_token {
+        if open_sync.token != sync_id {
             throw_err!(
                 BAD_REQUEST,
                 "Provided synchronization token does not match currently open sync."
@@ -421,7 +430,7 @@ pub async fn send_file(
 
         let tmp_path = state
             .paths
-            .slot_pending_dir(&slot.infos, &sync_token)
+            .slot_pending_dir(&slot.infos, &sync_id)
             .join(file_id);
 
         (tmp_path, file_id.clone(), *metadata, slot.infos.clone())
@@ -480,23 +489,36 @@ pub async fn send_file(
     .context("Failed to run modification time setter")
     .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    let completed_path = state
-        .paths
-        .slot_completion_dir(&slot, &sync_token)
-        .join(file_id);
+    // Move file to its destination
 
-    fs::rename(&tmp_path, &completed_path)
+    let final_path = state.paths.slot_content_dir(&slot_infos).join(&path);
+
+    fs::rename(&tmp_path, &final_path)
         .await
-        .context("Failed to move transferred file to the completion directory")
+        .with_context(|| {
+            format!(
+                "Failed to move complete file '{path}' to '{}'",
+                final_path.display()
+            )
+        })
+        .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
+
+    // Create completion marker file
+
+    let marker_path = &state
+        .paths
+        .slot_completion_dir(&slot_infos, &sync_id)
+        .join(&file_id);
+
+    fs::rename(&tmp_path, &marker_path)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to create transfer completion marker file at '{}'",
+                marker_path.display()
+            )
+        })
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
     Ok(Json(()))
 }
-
-// TODO: on app startup, check if sync was opened depending (store open sync data in a file)
-// TODO: route to forcefully close sync (removes temp. dirs)
-// TODO: route to forcefully remove pending file (removes the file)
-// TODO: route to read a file
-
-// TODO: client will first check if a sync. is pending => if so, ask the client for confirmation, if confirm, resume the open sync
-//       if not pending => begin a normal synchronization
