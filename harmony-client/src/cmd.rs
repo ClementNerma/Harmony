@@ -19,8 +19,8 @@ pub struct Args {
     #[clap(long, help = "Device name")]
     pub device_name: Option<String>,
 
-    #[clap(long, help = "Perform a dry run")]
-    pub dry_run: bool,
+    #[clap(flatten)]
+    pub sync_args: SyncArgs,
 
     #[clap(
         short,
@@ -29,6 +29,12 @@ pub struct Args {
     )]
     pub max_parallel_transfers: Option<usize>,
 
+    #[clap(global = true, short, long, help = "Display debug messages")]
+    pub verbose: bool,
+}
+
+#[derive(clap::Args)]
+pub struct SyncArgs {
     #[clap(
         short,
         long,
@@ -39,6 +45,6 @@ pub struct Args {
     #[clap(long, help = "File extensions to ignore")]
     pub ignore_exts: Vec<String>,
 
-    #[clap(global = true, short, long, help = "Display debug messages")]
-    pub verbose: bool,
+    #[clap(long, help = "Perform a dry run")]
+    pub dry_run: bool,
 }

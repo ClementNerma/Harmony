@@ -14,7 +14,10 @@ use log::{debug, error, info};
 use crate::{
     cmd::{BackupArgs, HttpArgs},
     data::AppData,
-    http::auth::auth_middleware,
+    http::{
+        auth::auth_middleware,
+        routes::{is_sync_open, resume_open_sync},
+    },
     paths::Paths,
 };
 
@@ -40,13 +43,16 @@ pub async fn launch(
 
     let app = Router::new()
         .route("/snapshot", post(snapshot))
-        .route("/begin-sync", post(begin_sync))
-        .route("/finalize-sync", post(finalize_sync))
-        .route("/send-file", post(send_file))
+        .route("/sync/is-open", get(is_sync_open))
+        .route("/sync/begin", post(begin_sync))
+        .route("/sync/resume", get(resume_open_sync))
+        .route("/sync/finalize", post(finalize_sync))
+        .route("/sync/send-file", post(send_file))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
         ))
+        // Routes below can be accessed without authentication
         .route("/request-access-token", post(request_access_token))
         .route("/healthcheck", get(healthcheck))
         .layer(middleware::from_fn(log_errors))

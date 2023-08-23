@@ -15,7 +15,7 @@ use std::{
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
-use cmd::Args;
+use cmd::{Args, SyncArgs};
 use colored::Colorize;
 use dialoguer::Confirm;
 use futures_util::TryStreamExt;
@@ -54,11 +54,9 @@ async fn inner_main() -> Result<()> {
         server_secret,
         device_name,
         slot_name,
-        dry_run,
         verbose,
         max_parallel_transfers,
-        ignore_items,
-        ignore_exts,
+        sync_args,
     } = Args::parse();
 
     if verbose {
@@ -97,6 +95,238 @@ async fn inner_main() -> Result<()> {
 
     // ======================================================= //
     // =
+    // = Check if a sync is already open
+    // =
+    // ======================================================= //
+
+    debug!("Checking if a sync is already open...");
+
+    let is_sync_open = request_url::<bool>("/sync/is-open", &access_token, |client| {
+        client.json(&json!({
+            "slot_name": slot_name
+        }))
+    })
+    .await
+    .context("Failed to check if a synchronization was already occurring for this slot")?;
+
+    let sync_infos = if is_sync_open {
+        warn!(
+            "A synchronization is already open for slot '{}'.",
+            slot_name.bright_cyan()
+        );
+
+        warn!("Are you sure you want to continue?");
+
+        let confirm = Confirm::new()
+            .with_prompt("Continue?".bright_blue().to_string())
+            .interact()?;
+
+        if !confirm {
+            warn!("Process was cancelled.");
+            std::process::exit(1);
+        }
+
+        debug!("Resuming open sync...");
+
+        request_url::<SyncInfos>("/sync/resume", &access_token, |client| {
+            client.json(&json!({
+                "slot_name": slot_name
+            }))
+        })
+        .await
+        .context("Failed to resume open sync")?
+    } else {
+        let Some(sync_infos) = open_sync(&url, &slot_name, &access_token, &data_dir, sync_args).await? else {
+            return Ok(());
+        };
+
+        sync_infos
+    };
+
+    let SyncInfos {
+        sync_token,
+        transfer_file_ids,
+        transfer_size,
+    } = sync_infos;
+
+    let mp = MultiProgress::new();
+
+    let pb_msg = Arc::new(RwLock::new(
+        mp.add(
+            ProgressBar::new(1)
+                .with_style(ProgressStyle::with_template("{msg}").unwrap())
+                .with_message("Running..."),
+        ),
+    ));
+
+    let transfer_pb = Arc::new(RwLock::new(
+        mp.add(
+            ProgressBar::new(transfer_file_ids.len() as u64).with_style(
+                ProgressStyle::with_template(
+                    "Transferring : [{elapsed_precise}] {prefix} {bar:40} {pos}/{len} files",
+                )
+                .unwrap(),
+            ),
+        ),
+    ));
+
+    let transfer_size_pb = Arc::new(RwLock::new(
+        mp.add(
+            ProgressBar::new(transfer_size).with_style(
+                ProgressStyle::with_template(
+                    "Transfer size: [{elapsed_precise}] {prefix} {bar:40} {bytes}/{total_bytes} ({binary_bytes_per_sec})",
+                )
+                .unwrap(),
+            ),
+        )
+    ));
+
+    let errors = Arc::new(Mutex::new(vec![]));
+
+    macro_rules! report_err {
+        ($err: expr, $errors: expr, $pb_msg: expr) => {{
+            let mut errors = $errors.lock().await;
+
+            errors.push($err);
+
+            let pb = $pb_msg.read().await;
+
+            pb.println(format!("{}", $err).bright_red().to_string());
+            pb.set_message(format!(
+                "Running... (encountered {} error(s))",
+                errors.len(),
+            ));
+        }};
+    }
+
+    let mut task_pool = JoinSet::new();
+
+    let max_parallel_transfers =
+        max_parallel_transfers.unwrap_or_else(|| std::cmp::min(num_cpus::get(), 8));
+
+    for (relative_path, _) in transfer_file_ids {
+        let data_dir = data_dir.clone();
+
+        let errors = Arc::clone(&errors);
+        let pb_msg = Arc::clone(&pb_msg);
+        let transfer_size_pb = Arc::clone(&transfer_size_pb);
+
+        transfer_pb.read().await.inc(1);
+
+        match File::open(data_dir.join(&relative_path)).await {
+            Err(err) => {
+                report_err!(
+                    format!("Failed to open file '{relative_path}' for transfer: {err}"),
+                    errors,
+                    pb_msg
+                );
+            }
+
+            Ok(file) => {
+                let transfer_size_pb = transfer_size_pb.clone();
+
+                let stream = BytesCodec::new().framed(file).inspect_ok(move |chunk| {
+                    let size = chunk.len() as u64;
+                    let transfer_size_pb = Arc::clone(&transfer_size_pb);
+
+                    tokio::spawn(async move {
+                        transfer_size_pb.read().await.inc(size);
+                    });
+                });
+
+                // Prepare variables for task closure
+                let url = url.join("send-file")?;
+                let access_token = access_token.clone();
+                let query = json!({
+                    "slot_name": slot_name,
+                    "sync_token": sync_token,
+                    "path": relative_path
+                });
+                let file_body = Body::wrap_stream(stream);
+                let relative_path = relative_path.clone();
+
+                // Send file
+                while task_pool.len() >= max_parallel_transfers {
+                    task_pool.join_next().await.unwrap()?;
+                }
+
+                task_pool.spawn(async move {
+                    let req = request_url::<()>(url, &access_token, |client| {
+                        client.query(&query).body(file_body)
+                    });
+
+                    if let Err(err) = req.await {
+                        report_err!(
+                            format!("Failed to transfer file '{relative_path}': {err}"),
+                            errors,
+                            pb_msg
+                        );
+                    }
+                });
+            }
+        }
+    }
+
+    while let Some(result) = task_pool.join_next().await {
+        result?;
+    }
+
+    transfer_pb.write().await.finish_and_clear();
+    transfer_size_pb.write().await.finish_and_clear();
+
+    // ======================================================= //
+    // =
+    // = Finalize synchronization
+    // =
+    // ======================================================= //
+
+    let errors = errors.lock().await;
+
+    if !errors.is_empty() {
+        for error in errors.as_slice() {
+            error!("* {error}");
+        }
+
+        bail!("{} error(s) occurred.", errors.len());
+    }
+
+    info!("Finalization synchronization on the server...");
+
+    request_url::<()>(url.join("finalize-sync")?, &access_token, |client| {
+        client.json(&json!({
+            "slot_name": slot_name,
+            "sync_token": sync_token
+        }))
+    })
+    .await
+    .context("Failed to finalize synchronization")?;
+
+    // ======================================================= //
+    // =
+    // = Done!
+    // =
+    // ======================================================= //
+
+    success!("Synchronized successfully.");
+
+    Ok(())
+}
+
+async fn open_sync(
+    url: &Url,
+    slot_name: &str,
+    access_token: &str,
+    data_dir: &Path,
+    args: SyncArgs,
+) -> Result<Option<SyncInfos>> {
+    let SyncArgs {
+        ignore_items,
+        ignore_exts,
+        dry_run,
+    } = args;
+
+    // ======================================================= //
+    // =
     // = Build local and remote snapshots
     // =
     // ======================================================= //
@@ -129,13 +359,13 @@ async fn inner_main() -> Result<()> {
 
     let (local, remote) = try_join!(
         async_with_spinner(local_pb, |pb| make_snapshot(
-            data_dir.clone(),
+            data_dir.to_owned(),
             pb,
             &snapshot_options
         )),
         async_with_spinner(remote_pb, |_| request_url::<SnapshotResult>(
             url.join("snapshot").unwrap(),
-            &access_token,
+            access_token,
             |client| client.json(&json!({
                 "slot_name": slot_name,
                 "snapshot_options": snapshot_options,
@@ -171,7 +401,7 @@ async fn inner_main() -> Result<()> {
 
     if added.is_empty() && modified.is_empty() && type_changed.is_empty() && deleted.is_empty() {
         success!("Nothing to do!");
-        return Ok(());
+        return Ok(None);
     }
 
     if !added.is_empty() {
@@ -307,7 +537,7 @@ async fn inner_main() -> Result<()> {
 
     debug!("Sending diff to server...");
 
-    let sync_infos = request_url::<SyncInfos>(url.join("begin-sync")?, &access_token, |client| {
+    let sync_infos = request_url::<SyncInfos>(url.join("begin-sync")?, access_token, |client| {
         client.json(&json!({
             "slot_name": slot_name,
             "diff": diff
@@ -316,178 +546,14 @@ async fn inner_main() -> Result<()> {
     .await
     .context("Failed to begin synchronization")?;
 
-    let SyncInfos {
-        sync_token,
-        transfer_file_ids,
-    } = sync_infos;
-
-    let mp = MultiProgress::new();
-
-    let pb_msg = Arc::new(RwLock::new(
-        mp.add(
-            ProgressBar::new(1)
-                .with_style(ProgressStyle::with_template("{msg}").unwrap())
-                .with_message("Running..."),
-        ),
-    ));
-
-    let transfer_pb = Arc::new(RwLock::new(
-        mp.add(
-            ProgressBar::new(transfer_file_ids.len() as u64).with_style(
-                ProgressStyle::with_template(
-                    "Transferring : [{elapsed_precise}] {prefix} {bar:40} {pos}/{len} files",
-                )
-                .unwrap(),
-            ),
-        ),
-    ));
-
-    let transfer_size_pb = Arc::new(RwLock::new(
-        mp.add(
-            ProgressBar::new(transfer_size ).with_style(
-                ProgressStyle::with_template(
-                    "Transfer size: [{elapsed_precise}] {prefix} {bar:40} {bytes}/{total_bytes} ({binary_bytes_per_sec})",
-                )
-                .unwrap(),
-            ),
-        )
-    ));
-
-    let errors = Arc::new(Mutex::new(vec![]));
-
-    macro_rules! report_err {
-        ($err: expr, $errors: expr, $pb_msg: expr) => {{
-            let mut errors = $errors.lock().await;
-
-            errors.push($err);
-
-            let pb = $pb_msg.read().await;
-
-            pb.println($err);
-            pb.set_message(format!(
-                "Running... (encountered {} error(s))",
-                errors.len(),
-            ));
-        }};
-    }
-
-    let mut task_pool = JoinSet::new();
-
-    let max_parallel_transfers =
-        max_parallel_transfers.unwrap_or_else(|| std::cmp::min(num_cpus::get(), 8));
-
-    for (relative_path, _) in transfer_file_ids {
-        let data_dir = data_dir.clone();
-
-        let errors = Arc::clone(&errors);
-        let pb_msg = Arc::clone(&pb_msg);
-        let transfer_size_pb = Arc::clone(&transfer_size_pb);
-
-        transfer_pb.read().await.inc(1);
-
-        match File::open(data_dir.join(&relative_path)).await {
-            Err(err) => {
-                report_err!(
-                    format!("Failed to open file '{relative_path}' for transfer: {err}"),
-                    errors,
-                    pb_msg
-                );
-            }
-
-            Ok(file) => {
-                let transfer_size_pb = transfer_size_pb.clone();
-
-                let stream = BytesCodec::new().framed(file).inspect_ok(move |chunk| {
-                    let size = chunk.len() as u64;
-                    let transfer_size_pb = Arc::clone(&transfer_size_pb);
-
-                    tokio::spawn(async move {
-                        transfer_size_pb.read().await.inc(size);
-                    });
-                });
-
-                // Prepare variables for task closure
-                let url = url.join("send-file")?;
-                let access_token = access_token.clone();
-                let query = json!({
-                    "slot_name": slot_name,
-                    "sync_token": sync_token,
-                    "path": relative_path
-                });
-                let file_body = Body::wrap_stream(stream);
-                let relative_path = relative_path.clone();
-
-                // Send file
-                while task_pool.len() >= max_parallel_transfers {
-                    task_pool.join_next().await.unwrap()?;
-                }
-
-                task_pool.spawn(async move {
-                    let req = request_url::<()>(url, &access_token, |client| {
-                        client.query(&query).body(file_body)
-                    });
-
-                    if let Err(err) = req.await {
-                        report_err!(
-                            format!("Failed to transfer file '{relative_path}': {err}"),
-                            errors,
-                            pb_msg
-                        );
-                    }
-                });
-            }
-        }
-    }
-
-    while let Some(result) = task_pool.join_next().await {
-        result?;
-    }
-
-    transfer_pb.write().await.finish_and_clear();
-    transfer_size_pb.write().await.finish_and_clear();
-
-    // ======================================================= //
-    // =
-    // = Finalize synchronization
-    // =
-    // ======================================================= //
-
-    let errors = errors.lock().await;
-
-    if !errors.is_empty() {
-        for error in errors.as_slice() {
-            error!("* {error}");
-        }
-
-        bail!("{} error(s) occurred.", errors.len());
-    }
-
-    info!("Finalization synchronization on the server...");
-
-    request_url::<()>(url.join("finalize-sync")?, &access_token, |client| {
-        client.json(&json!({
-            "slot_name": slot_name,
-            "sync_token": sync_token
-        }))
-    })
-    .await
-    .context("Failed to finalize synchronization")?;
-
-    // ======================================================= //
-    // =
-    // = Done!
-    // =
-    // ======================================================= //
-
-    success!("Synchronized successfully.");
-
-    Ok(())
+    Ok(Some(sync_infos))
 }
 
 #[derive(Deserialize)]
 pub struct SyncInfos {
     sync_token: String,
     transfer_file_ids: HashMap<String, String>,
+    transfer_size: u64,
 }
 
 async fn request_url<T: DeserializeOwned>(

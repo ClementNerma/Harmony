@@ -117,6 +117,7 @@ pub struct BeginSyncParams {
 pub struct SyncInfos {
     sync_token: String,
     transfer_file_ids: HashMap<String, String>,
+    tranfer_size: u64,
 }
 
 pub async fn begin_sync(
@@ -169,6 +170,81 @@ pub async fn begin_sync(
             .iter()
             .map(|(id, (relative_path, _))| (id.clone(), relative_path.clone()))
             .collect(),
+        tranfer_size: open_sync
+            .diff_ops
+            .send_files
+            .iter()
+            .map(|(_, mt)| mt.size)
+            .sum(),
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct IsSyncOpenParams {
+    slot_name: String,
+}
+
+pub async fn is_sync_open(
+    State(state): State<HttpState>,
+    Json(payload): Json<IsSyncOpenParams>,
+) -> HttpResult<Json<bool>> {
+    let IsSyncOpenParams { slot_name } = payload;
+
+    let slot = state
+        .slots
+        .get(&slot_name)
+        .context("Provided slot was not found")
+        .map_err(handle_err!(NOT_FOUND))?
+        .read()
+        .await;
+
+    Ok(Json(slot.open_sync.is_some()))
+}
+
+#[derive(Deserialize)]
+pub struct ResumeOpenSyncParams {
+    slot_name: String,
+}
+
+pub async fn resume_open_sync(
+    State(state): State<HttpState>,
+    Json(payload): Json<ResumeOpenSyncParams>,
+) -> HttpResult<Json<SyncInfos>> {
+    let ResumeOpenSyncParams { slot_name } = payload;
+
+    let mut slot = state
+        .slots
+        .get(&slot_name)
+        .context("Provided slot was not found")
+        .map_err(handle_err!(NOT_FOUND))?
+        .write()
+        .await;
+
+    let Some(open_sync) = slot.open_sync.as_mut() else {
+        throw_err!(
+            CONFLICT,
+            "No synchronization is currently open for the provided slot"
+        )
+    };
+
+    let sync_token = open_sync.regenerate_access_token();
+
+    // TODO: return a subset of "transfer_file_ids" containing only the files that haven't been transferred yet
+    //       also apply this filter when computing transfer size
+
+    Ok(Json(SyncInfos {
+        sync_token,
+        transfer_file_ids: open_sync
+            .files
+            .iter()
+            .map(|(id, (relative_path, _))| (id.clone(), relative_path.clone()))
+            .collect(),
+        tranfer_size: open_sync
+            .diff_ops
+            .send_files
+            .iter()
+            .map(|(_, mt)| mt.size)
+            .sum(),
     }))
 }
 
