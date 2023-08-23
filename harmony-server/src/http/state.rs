@@ -16,8 +16,9 @@ use super::errors::HttpResult;
 
 #[derive(Clone)]
 pub struct HttpState {
-    pub backup_args: Arc<RwLock<BackupArgs>>,
-    pub paths: Arc<RwLock<Paths>>,
+    pub backup_args: Arc<BackupArgs>,
+    pub paths: Arc<Paths>,
+
     pub app_data: Arc<RwLock<AppData>>,
 
     // This is kind of a weird type, huh?
@@ -45,8 +46,8 @@ impl HttpState {
                     .collect(),
             ),
 
-            backup_args: Arc::new(RwLock::new(args)),
-            paths: Arc::new(RwLock::new(paths)),
+            backup_args: Arc::new(args),
+            paths: Arc::new(paths),
             app_data: Arc::new(RwLock::new(app_data)),
         }
     }

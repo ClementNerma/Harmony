@@ -39,9 +39,6 @@ pub async fn request_access_token(
     State(state): State<HttpState>,
     Json(payload): Json<RequestAccessTokenPayload>,
 ) -> HttpResult<Json<String>> {
-    let expected_secret_password = state.backup_args.read().await.secret.clone();
-    let app_data_file = state.paths.read().await.app_data_file();
-
     let mut app_data = state.app_data.write().await;
 
     let RequestAccessTokenPayload {
@@ -49,13 +46,13 @@ pub async fn request_access_token(
         device_name,
     } = payload;
 
-    if secret_password != expected_secret_password {
+    if secret_password != state.backup_args.secret {
         throw_err!(BAD_REQUEST, "Invalid secret password provided");
     }
 
     let access_token = app_data.create_access_token(device_name).clone();
 
-    if let Err(err) = app_data.save(&app_data_file).await {
+    if let Err(err) = app_data.save(&state.paths.app_data_file()).await {
         error!("Failed to save data file: {err:?}");
         throw_err!(INTERNAL_SERVER_ERROR, "Failed to save app data file");
     }
@@ -96,9 +93,7 @@ pub async fn snapshot(
             );
         }
 
-        let paths = state.paths.read().await;
-
-        paths.slot_content_dir(&slot.infos)
+        state.paths.slot_content_dir(&slot.infos)
     };
 
     make_snapshot(path, |_| {}, &snapshot_options)
@@ -146,19 +141,17 @@ pub async fn begin_sync(
     // Required as using .insert() makes the compiler think we have a mutable borrow here, even when doing &*
     let open_sync = slot.open_sync.as_ref().unwrap();
 
-    let paths = state.paths.read().await;
-
-    fs::create_dir(paths.slot_transfer_dir(&slot.infos, &open_sync.id))
+    fs::create_dir(state.paths.slot_transfer_dir(&slot.infos, &open_sync.id))
         .await
         .context("Failed to create the synchronization directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    fs::create_dir(paths.slot_pending_dir(&slot.infos, &open_sync.id))
+    fs::create_dir(state.paths.slot_pending_dir(&slot.infos, &open_sync.id))
         .await
         .context("Failed to create the pending transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    fs::create_dir(paths.slot_completion_dir(&slot.infos, &open_sync.id))
+    fs::create_dir(state.paths.slot_completion_dir(&slot.infos, &open_sync.id))
         .await
         .context("Failed to create the complete transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
@@ -231,12 +224,11 @@ pub async fn resume_open_sync(
 
     let sync_token = open_sync.regenerate_access_token();
 
-    let paths = state.paths.read().await;
-
     let mut remaining_files = HashMap::new();
 
     for (id, data) in &open_sync.files {
-        if !paths
+        if !state
+            .paths
             .slot_completion_dir(&slot_infos, &open_sync.id)
             .join(id)
             .exists()
@@ -244,7 +236,10 @@ pub async fn resume_open_sync(
             remaining_files.insert(id.clone(), data.clone());
         }
 
-        let tmp_path = paths.slot_transfer_dir(&slot_infos, &open_sync.id).join(id);
+        let tmp_path = state
+            .paths
+            .slot_transfer_dir(&slot_infos, &open_sync.id)
+            .join(id);
 
         if tmp_path.exists() {
             fs::remove_file(&tmp_path)
@@ -313,8 +308,7 @@ pub async fn finalize_sync(
         );
     }
 
-    let paths = state.paths.read().await;
-    let complete_dir = paths.slot_completion_dir(&slot.infos, &open_sync.id);
+    let complete_dir = state.paths.slot_completion_dir(&slot.infos, &open_sync.id);
 
     for (relative_path, (id, _)) in &open_sync.files {
         if !complete_dir.join(id).is_file() {
@@ -327,7 +321,7 @@ pub async fn finalize_sync(
 
     // TODO: add option to backup type changed + deleted items in original directory to compressed archive (or do a full complete backup?)
 
-    let slot_files_dir = paths.slot_content_dir(&slot.infos);
+    let slot_files_dir = state.paths.slot_content_dir(&slot.infos);
 
     for relative_path in &open_sync.diff_ops.create_dirs {
         fs::create_dir(slot_files_dir.join(relative_path))
@@ -357,7 +351,7 @@ pub async fn finalize_sync(
             .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
     }
 
-    fs::remove_dir(paths.slot_pending_dir(&slot.infos, &open_sync.id))
+    fs::remove_dir(state.paths.slot_pending_dir(&slot.infos, &open_sync.id))
         .await
         .context("Failed to remove the pending transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
@@ -367,7 +361,7 @@ pub async fn finalize_sync(
         .context("Failed to remove the complete transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    fs::remove_dir(paths.slot_transfer_dir(&slot.infos, &open_sync.id))
+    fs::remove_dir(state.paths.slot_transfer_dir(&slot.infos, &open_sync.id))
         .await
         .context("Failed to remove the slot directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
@@ -427,8 +421,6 @@ pub async fn send_file(
 
         let tmp_path = state
             .paths
-            .read()
-            .await
             .slot_pending_dir(&slot.infos, &sync_token)
             .join(file_id);
 
@@ -490,8 +482,6 @@ pub async fn send_file(
 
     let completed_path = state
         .paths
-        .read()
-        .await
         .slot_completion_dir(&slot, &sync_token)
         .join(file_id);
 
