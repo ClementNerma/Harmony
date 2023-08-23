@@ -220,6 +220,8 @@ pub async fn resume_open_sync(
         .write()
         .await;
 
+    let slot_infos = slot.infos.clone();
+
     let Some(open_sync) = slot.open_sync.as_mut() else {
         throw_err!(
             CONFLICT,
@@ -229,13 +231,37 @@ pub async fn resume_open_sync(
 
     let sync_token = open_sync.regenerate_access_token();
 
-    // TODO: return a subset of "transfer_file_ids" containing only the files that haven't been transferred yet
-    //       also apply this filter when computing transfer size
+    let paths = state.paths.read().await;
+
+    let mut remaining_files = HashMap::new();
+
+    for (id, data) in &open_sync.files {
+        if !paths
+            .slot_completion_dir(&slot_infos, &open_sync.id)
+            .join(id)
+            .exists()
+        {
+            remaining_files.insert(id.clone(), data.clone());
+        }
+
+        let tmp_path = paths.slot_transfer_dir(&slot_infos, &open_sync.id).join(id);
+
+        if tmp_path.exists() {
+            fs::remove_file(&tmp_path)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to remove partially transferred file at '{}'",
+                        tmp_path.display()
+                    )
+                })
+                .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
+        }
+    }
 
     Ok(Json(SyncInfos {
         sync_token,
-        transfer_file_ids: open_sync
-            .files
+        transfer_file_ids: remaining_files
             .iter()
             .map(|(id, (relative_path, _))| (id.clone(), relative_path.clone()))
             .collect(),
@@ -243,6 +269,7 @@ pub async fn resume_open_sync(
             .diff_ops
             .send_files
             .iter()
+            .filter(|(id, _)| remaining_files.contains_key(id))
             .map(|(_, mt)| mt.size)
             .sum(),
     }))
@@ -476,9 +503,7 @@ pub async fn send_file(
     Ok(Json(()))
 }
 
-// TODO: route to check if a sync. is pending
-// TODO: route to change the access token of an open sync (not the inner token as it's in the dir path!) to resume a pending sync
-//       => removes everything in the temporary directory and returns only the subset of files to transfer given what's in "completed"
+// TODO: on app startup, check if sync was opened depending (store open sync data in a file)
 // TODO: route to forcefully close sync (removes temp. dirs)
 // TODO: route to forcefully remove pending file (removes the file)
 // TODO: route to read a file

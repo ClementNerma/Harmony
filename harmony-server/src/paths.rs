@@ -32,17 +32,17 @@ impl Paths {
             .unwrap_or_else(|| self.slot_root_dir(slot).join("content"))
     }
 
-    pub fn slot_transfer_dir(&self, slot: &SlotInfos, sync_token: &str) -> PathBuf {
+    pub fn slot_transfer_dir(&self, slot: &SlotInfos, sync_id: &str) -> PathBuf {
         self.slot_root_dir(slot)
-            .join(format!("open-sync-{sync_token}"))
+            .join(format!("open-sync-{sync_id}"))
     }
 
-    pub fn slot_completion_dir(&self, slot: &SlotInfos, sync_token: &str) -> PathBuf {
-        self.slot_transfer_dir(slot, sync_token).join("complete")
+    pub fn slot_completion_dir(&self, slot: &SlotInfos, sync_id: &str) -> PathBuf {
+        self.slot_transfer_dir(slot, sync_id).join("complete")
     }
 
-    pub fn slot_pending_dir(&self, slot: &SlotInfos, sync_token: &str) -> PathBuf {
-        self.slot_transfer_dir(slot, sync_token).join("pending")
+    pub fn slot_pending_dir(&self, slot: &SlotInfos, sync_id: &str) -> PathBuf {
+        self.slot_transfer_dir(slot, sync_id).join("pending")
     }
 }
 
