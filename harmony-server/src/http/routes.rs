@@ -332,6 +332,13 @@ pub async fn send_file(
         (tmp_path, file_id.clone(), *metadata, slot.infos.clone())
     };
 
+    if tmp_path.is_file() {
+        throw_err!(
+            BAD_REQUEST,
+            "The provided file is already being transferred!"
+        );
+    }
+
     let mut tmp_file = File::create(&tmp_path)
         .await
         .context("Failed to create a temporary file")
