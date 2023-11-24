@@ -4,7 +4,7 @@ version = "0.1.2"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.72"
-serde = { version = "1.0.174", features = ["derive"] }
-tokio = "1.29.1"
-walkdir = "2.3.3"
+anyhow = "1.0.75"
+serde = { version = "1.0.193", features = ["derive"] }
+tokio = "1.34.0"
+walkdir = "2.4.0"

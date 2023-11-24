@@ -131,7 +131,9 @@ async fn inner_main() -> Result<()> {
         .await
         .context("Failed to resume open sync")?
     } else {
-        let Some(sync_infos) = open_sync(&url, &slot_name, &access_token, &data_dir, sync_args).await? else {
+        let Some(sync_infos) =
+            open_sync(&url, &slot_name, &access_token, &data_dir, sync_args).await?
+        else {
             return Ok(());
         };
 
@@ -365,14 +367,6 @@ async fn open_sync(
             }))
         ))
     )?;
-
-    // for msg in local.debug {
-    //     debug!("[snapshot:local] {msg}");
-    // }
-
-    // for msg in remote.debug {
-    //     debug!("[snapshot:remote] {msg}");
-    // }
 
     // ======================================================= //
     // =

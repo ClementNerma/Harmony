@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result};
 use walkdir::{DirEntry, WalkDir};
 
 pub struct FallibleEntryFilter<'a> {
@@ -18,43 +18,37 @@ impl<'a> FallibleEntryFilter<'a> {
             filter: Box::new(filter),
         }
     }
+
+    fn iter_next(&mut self) -> Result<Option<DirEntry>> {
+        loop {
+            let Some(entry) = self.iter.next() else {
+                return Ok(None);
+            };
+
+            let entry = entry.context("Failed to read next directory entry")?;
+
+            if (self.filter)(&entry)? {
+                break Ok(Some(entry));
+            }
+
+            let mt = entry.metadata().with_context(|| {
+                format!(
+                    "Failed to get metadata for filtered item '{}'",
+                    entry.path().display()
+                )
+            })?;
+
+            if mt.is_dir() {
+                self.iter.skip_current_dir();
+            }
+        }
+    }
 }
 
 impl<'a> Iterator for FallibleEntryFilter<'a> {
-    type Item = Result<Result<DirEntry>, walkdir::Error>;
+    type Item = Result<DirEntry>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let entry = self.iter.next()?;
-
-            match entry {
-                Ok(entry) => match (self.filter)(&entry) {
-                    Ok(should_keep) => {
-                        if should_keep {
-                            break Some(Ok(Ok(entry)));
-                        } else {
-                            match entry.metadata() {
-                                Ok(mt) => {
-                                    if mt.is_dir() {
-                                        self.iter.skip_current_dir();
-                                    }
-
-                                    continue;
-                                }
-                                Err(err) => {
-                                    break Some(Ok(Err(anyhow!(
-                                        "Failed to get metadata for filtered item '{}': {}",
-                                        entry.path().display(),
-                                        err
-                                    ))))
-                                }
-                            }
-                        }
-                    }
-                    Err(err) => break Some(Ok(Err(err))),
-                },
-                Err(err) => break Some(Err(err)),
-            }
-        }
+        self.iter_next().transpose()
     }
 }

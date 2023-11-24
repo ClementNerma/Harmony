@@ -136,7 +136,7 @@ pub async fn make_snapshot(
     });
 
     for item in walker_with_ignores {
-        let item = item.context("Failed to analyze directory entry")??;
+        let item = item.context("Failed to analyze directory entry")?;
 
         let from = from_dir.clone();
 
