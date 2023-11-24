@@ -2,13 +2,14 @@ use harmony_differ::{
     diffing::{Diff, DiffApplyOps},
     snapshot::SnapshotFileMetadata,
 };
-use std::{collections::HashMap, ops::Deref, path::Path, sync::Arc};
+use rand::{thread_rng, Rng};
+use std::{collections::HashMap, path::Path, sync::Arc};
 use tokio::sync::RwLock;
 
 use crate::{
     cmd::BackupArgs,
     data::{generate_id, AppData},
-    paths::{is_relative_linear_path, Paths, SlotInfos},
+    paths::{is_relative_linear_path, Paths, SlotInfos, SyncId},
     throw_err,
 };
 
@@ -68,7 +69,7 @@ impl SlotSync {
 }
 
 pub struct OpenSync {
-    pub id: FileId,
+    pub id: SyncId,
     pub token: String,
     pub diff: Diff,
     pub diff_ops: DiffApplyOps,
@@ -80,7 +81,7 @@ impl OpenSync {
         let diff_ops = diff.ops();
 
         Ok(Self {
-            id: FileId::new(),
+            id: SyncId(thread_rng().gen()),
             token: generate_id(),
             files: diff_ops
                 .send_files
@@ -102,21 +103,5 @@ impl OpenSync {
         let id = generate_id();
         self.token = id.clone();
         id
-    }
-}
-
-pub struct FileId(String);
-
-impl FileId {
-    pub fn new() -> Self {
-        Self(generate_id())
-    }
-}
-
-impl Deref for FileId {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }

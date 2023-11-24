@@ -45,9 +45,9 @@ pub async fn launch(
         .route("/snapshot", post(snapshot))
         .route("/sync/is-open", get(is_sync_open))
         .route("/sync/begin", post(begin_sync))
-        .route("/sync/resume", get(resume_open_sync))
+        .route("/sync/resume", post(resume_open_sync))
         .route("/sync/finalize", post(finalize_sync))
-        .route("/sync/send-file", post(send_file))
+        .route("/sync/file", post(send_file))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,

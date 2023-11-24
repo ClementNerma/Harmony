@@ -25,7 +25,7 @@ use harmony_differ::{
     snapshot::{make_snapshot, SnapshotItemMetadata, SnapshotOptions, SnapshotResult},
 };
 use indicatif::{HumanBytes, MultiProgress, ProgressBar, ProgressStyle};
-use reqwest::{Body, Client, IntoUrl, RequestBuilder, Url};
+use reqwest::{Body, Client, Method, RequestBuilder, Url};
 use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::json;
 use time::OffsetDateTime;
@@ -44,11 +44,11 @@ async fn main() {
 
 async fn inner_main() -> Result<()> {
     let Args {
-        data_dir,
+        source_dir,
         address,
-        server_secret,
+        secret,
         device_name,
-        slot_name,
+        slot,
         verbose,
         max_parallel_transfers,
         sync_args,
@@ -60,11 +60,15 @@ async fn inner_main() -> Result<()> {
 
     debug!("Started.");
 
-    if !data_dir.is_dir() {
+    if !source_dir.is_dir() {
         bail!("Provided data directory was not found");
     }
 
-    let url = Url::parse(&address)?;
+    let base_url = Url::parse(&address)?;
+
+    if base_url.cannot_be_a_base() {
+        bail!("Provided URL cannot be a base");
+    }
 
     // ======================================================= //
     // =
@@ -77,16 +81,22 @@ async fn inner_main() -> Result<()> {
 
     let device_name = device_name.unwrap_or_else(|| gethostname().to_string_lossy().into_owned());
 
-    let access_token = request_url::<String>(url.join("request-access-token")?, "-", |client| {
-        client.json(&json!({
-            "secret_password": server_secret,
-            "device_name": device_name
-        }))
-    })
+    let access_token = request_url::<String>(
+        Method::POST,
+        "/request-access-token",
+        &base_url,
+        "-",
+        |client| {
+            client.json(&json!({
+                "secret_password": secret,
+                "device_name": device_name
+            }))
+        },
+    )
     .await
     .context("Failed to request an access token")?;
 
-    drop(server_secret);
+    drop(secret);
 
     // ======================================================= //
     // =
@@ -96,18 +106,24 @@ async fn inner_main() -> Result<()> {
 
     debug!("Checking if a sync is already open...");
 
-    let is_sync_open = request_url::<bool>("/sync/is-open", &access_token, |client| {
-        client.json(&json!({
-            "slot_name": slot_name
-        }))
-    })
+    let is_sync_open = request_url::<bool>(
+        Method::GET,
+        "/sync/is-open",
+        &base_url,
+        &access_token,
+        |client| {
+            client.json(&json!({
+                "slot_name": slot
+            }))
+        },
+    )
     .await
     .context("Failed to check if a synchronization was already occurring for this slot")?;
 
     let sync_infos = if is_sync_open {
         warn!(
             "A synchronization is already open for slot '{}'.",
-            slot_name.bright_cyan()
+            slot.bright_cyan()
         );
 
         warn!("Are you sure you want to continue?");
@@ -123,16 +139,22 @@ async fn inner_main() -> Result<()> {
 
         debug!("Resuming open sync...");
 
-        request_url::<SyncInfos>("/sync/resume", &access_token, |client| {
-            client.json(&json!({
-                "slot_name": slot_name
-            }))
-        })
+        request_url::<SyncInfos>(
+            Method::POST,
+            "/sync/resume",
+            &base_url,
+            &access_token,
+            |client| {
+                client.json(&json!({
+                    "slot_name": slot
+                }))
+            },
+        )
         .await
         .context("Failed to resume open sync")?
     } else {
         let Some(sync_infos) =
-            open_sync(&url, &slot_name, &access_token, &data_dir, sync_args).await?
+            open_sync(&base_url, &slot, &access_token, &source_dir, sync_args).await?
         else {
             return Ok(());
         };
@@ -187,10 +209,10 @@ async fn inner_main() -> Result<()> {
             errors.push($err);
 
             $pb.println(format!("{}", $err).bright_red().to_string());
-            $pb.set_message(format!(
-                "Running... (encountered {} error(s))",
-                errors.len(),
-            ));
+            // $pb.set_message(format!(
+            //     "Running... (encountered {} error(s))",
+            //     errors.len(),
+            // ));
         }};
     }
 
@@ -200,7 +222,7 @@ async fn inner_main() -> Result<()> {
         max_parallel_transfers.unwrap_or_else(|| std::cmp::min(num_cpus::get(), 8));
 
     for (relative_path, _) in transfer_file_ids {
-        let data_dir = data_dir.clone();
+        let data_dir = source_dir.clone();
 
         let errors = Arc::clone(&errors);
         let pb_msg = Arc::clone(&pb_msg);
@@ -230,10 +252,10 @@ async fn inner_main() -> Result<()> {
                 });
 
                 // Prepare variables for task closure
-                let url = url.join("send-file")?;
+                let base_url = base_url.clone();
                 let access_token = access_token.clone();
                 let query = json!({
-                    "slot_name": slot_name,
+                    "slot_name": slot,
                     "sync_token": sync_token,
                     "path": relative_path
                 });
@@ -246,9 +268,13 @@ async fn inner_main() -> Result<()> {
                 }
 
                 task_pool.spawn(async move {
-                    let req = request_url::<()>(url, &access_token, |client| {
-                        client.query(&query).body(file_body)
-                    });
+                    let req = request_url::<()>(
+                        Method::POST,
+                        "/sync/file",
+                        &base_url,
+                        &access_token,
+                        |client| client.query(&query).body(file_body),
+                    );
 
                     if let Err(err) = req.await {
                         report_err!(
@@ -278,21 +304,27 @@ async fn inner_main() -> Result<()> {
     let errors = errors.lock().await;
 
     if !errors.is_empty() {
-        for error in errors.as_slice() {
-            error!("* {error}");
-        }
+        // for error in errors.as_slice() {
+        //     error!("* {error}");
+        // }
 
-        bail!("{} error(s) occurred.", errors.len());
+        bail!("{} error(s) occurred (see above).", errors.len());
     }
 
     info!("Finalization synchronization on the server...");
 
-    request_url::<()>(url.join("finalize-sync")?, &access_token, |client| {
-        client.json(&json!({
-            "slot_name": slot_name,
-            "sync_token": sync_token
-        }))
-    })
+    request_url::<()>(
+        Method::POST,
+        "/sync/finalize",
+        &base_url,
+        &access_token,
+        |client| {
+            client.json(&json!({
+                "slot_name": slot,
+                "sync_token": sync_token
+            }))
+        },
+    )
     .await
     .context("Failed to finalize synchronization")?;
 
@@ -308,7 +340,7 @@ async fn inner_main() -> Result<()> {
 }
 
 async fn open_sync(
-    url: &Url,
+    base_url: &Url,
     slot_name: &str,
     access_token: &str,
     data_dir: &Path,
@@ -359,7 +391,9 @@ async fn open_sync(
             &snapshot_options
         )),
         async_with_spinner(remote_pb, |_| request_url::<SnapshotResult>(
-            url.join("snapshot").unwrap(),
+            Method::POST,
+            "/snapshot",
+            base_url,
             access_token,
             |client| client.json(&json!({
                 "slot_name": slot_name,
@@ -524,12 +558,18 @@ async fn open_sync(
 
     debug!("Sending diff to server...");
 
-    let sync_infos = request_url::<SyncInfos>(url.join("begin-sync")?, access_token, |client| {
-        client.json(&json!({
-            "slot_name": slot_name,
-            "diff": diff
-        }))
-    })
+    let sync_infos = request_url::<SyncInfos>(
+        Method::POST,
+        "/sync/begin",
+        base_url,
+        access_token,
+        |client| {
+            client.json(&json!({
+                "slot_name": slot_name,
+                "diff": diff
+            }))
+        },
+    )
     .await
     .context("Failed to begin synchronization")?;
 
@@ -537,18 +577,23 @@ async fn open_sync(
 }
 
 #[derive(Deserialize)]
-pub struct SyncInfos {
+#[serde(deny_unknown_fields)]
+struct SyncInfos {
     sync_token: String,
     transfer_file_ids: HashMap<String, String>,
     transfer_size: u64,
 }
 
 async fn request_url<T: DeserializeOwned>(
-    url: impl IntoUrl,
+    method: Method,
+    join_url: &str,
+    base_url: &Url,
     access_token: &str,
     with_client: impl FnOnce(RequestBuilder) -> RequestBuilder,
 ) -> Result<T> {
-    let req = Client::new().post(url).bearer_auth(access_token);
+    let req = Client::new()
+        .request(method, base_url.join(join_url)?)
+        .bearer_auth(access_token);
 
     let res = with_client(req)
         .send()
@@ -561,7 +606,9 @@ async fn request_url<T: DeserializeOwned>(
             .await
             .unwrap_or_else(|_| "<failed to get response body as text>".to_string());
 
-        return Err(anyhow!("{err}").context(format!("Response body: {res_text}")));
+        return Err(
+            anyhow!("{err}").context(format!("Server responded: {}", res_text.bright_yellow()))
+        );
     }
 
     let text = res
@@ -571,7 +618,7 @@ async fn request_url<T: DeserializeOwned>(
 
     let res = serde_json::from_str::<T>(&text).with_context(|| {
         format!(
-            "Failed to parse HTTP response as JSON: {}",
+            "Failed to parse server's response: {}",
             text.bright_yellow()
         )
     })?;

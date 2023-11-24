@@ -7,7 +7,7 @@ use crate::paths::SlotInfos;
 
 #[derive(Parser)]
 pub struct Args {
-    #[clap(short, long, help = "Synchronization directory")]
+    #[clap(help = "Synchronization directory")]
     pub data_dir: PathBuf,
 
     #[clap(flatten)]
@@ -37,6 +37,6 @@ pub struct BackupArgs {
     )]
     pub slots: Vec<SlotInfos>,
 
-    #[clap(short, long, help = "The secret password")]
+    #[clap(long, help = "The secret password")]
     pub secret: String,
 }

@@ -4,17 +4,17 @@ use clap::Parser;
 
 #[derive(Parser)]
 pub struct Args {
-    #[clap(short, long, help = "Path to the data directory")]
-    pub data_dir: PathBuf,
+    #[clap(help = "Directory to synchronize")]
+    pub source_dir: PathBuf,
 
-    #[clap(short, long, long, help = "Address of the server")]
+    #[clap(help = "Address of the server")]
     pub address: String,
 
-    #[clap(long, help = "Server's secret password")]
-    pub server_secret: String,
+    #[clap(help = "Slot name to use")]
+    pub slot: String,
 
-    #[clap(short, long, help = "Slot name to use")]
-    pub slot_name: String,
+    #[clap(long, help = "Server's secret password")]
+    pub secret: String,
 
     #[clap(long, help = "Device name")]
     pub device_name: Option<String>,

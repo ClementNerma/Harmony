@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AppData {
     access_tokens: Vec<AccessToken>,
 }
@@ -49,6 +50,7 @@ impl AppData {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AccessToken {
     device_name: String,
     token: String,

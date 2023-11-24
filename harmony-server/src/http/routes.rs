@@ -30,6 +30,7 @@ pub async fn healthcheck() -> &'static str {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RequestAccessTokenPayload {
     secret_password: String,
     device_name: String,
@@ -61,6 +62,7 @@ pub async fn request_access_token(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SnapshotParams {
     slot_name: String,
     snapshot_options: SnapshotOptions,
@@ -103,6 +105,7 @@ pub async fn snapshot(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BeginSyncParams {
     slot_name: String,
     diff: Diff,
@@ -112,7 +115,7 @@ pub struct BeginSyncParams {
 pub struct SyncInfos {
     sync_token: String,
     transfer_file_ids: HashMap<String, String>,
-    tranfer_size: u64,
+    transfer_size: u64,
 }
 
 pub async fn begin_sync(
@@ -138,17 +141,17 @@ pub async fn begin_sync(
 
     let open_sync = OpenSync::new(diff)?;
 
-    fs::create_dir(state.paths.slot_transfer_dir(&slot.infos, &open_sync.id))
+    fs::create_dir(state.paths.slot_transfer_dir(&slot.infos, open_sync.id))
         .await
         .context("Failed to create the synchronization directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    fs::create_dir(state.paths.slot_pending_dir(&slot.infos, &open_sync.id))
+    fs::create_dir(state.paths.slot_pending_dir(&slot.infos, open_sync.id))
         .await
         .context("Failed to create the pending transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    fs::create_dir(state.paths.slot_completion_dir(&slot.infos, &open_sync.id))
+    fs::create_dir(state.paths.slot_completion_dir(&slot.infos, open_sync.id))
         .await
         .context("Failed to create the complete transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
@@ -178,7 +181,7 @@ pub async fn begin_sync(
             .map(|(id, (relative_path, _))| (id.clone(), relative_path.clone()))
             .collect(),
 
-        tranfer_size: open_sync
+        transfer_size: open_sync
             .diff_ops
             .send_files
             .iter()
@@ -193,6 +196,7 @@ pub async fn begin_sync(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct IsSyncOpenParams {
     slot_name: String,
 }
@@ -215,6 +219,7 @@ pub async fn is_sync_open(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ResumeOpenSyncParams {
     slot_name: String,
 }
@@ -249,7 +254,7 @@ pub async fn resume_open_sync(
     for (id, data) in &open_sync.files {
         if !state
             .paths
-            .slot_completion_dir(&slot_infos, &open_sync.id)
+            .slot_completion_dir(&slot_infos, open_sync.id)
             .join(id)
             .exists()
         {
@@ -258,7 +263,7 @@ pub async fn resume_open_sync(
 
         let tmp_path = state
             .paths
-            .slot_transfer_dir(&slot_infos, &open_sync.id)
+            .slot_transfer_dir(&slot_infos, open_sync.id)
             .join(id);
 
         if tmp_path.exists() {
@@ -280,7 +285,7 @@ pub async fn resume_open_sync(
             .iter()
             .map(|(id, (relative_path, _))| (id.clone(), relative_path.clone()))
             .collect(),
-        tranfer_size: open_sync
+        transfer_size: open_sync
             .diff_ops
             .send_files
             .iter()
@@ -291,6 +296,7 @@ pub async fn resume_open_sync(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SyncFinalizationParams {
     slot_name: String,
     sync_token: String,
@@ -328,7 +334,7 @@ pub async fn finalize_sync(
         );
     }
 
-    let complete_dir = state.paths.slot_completion_dir(&slot.infos, &open_sync.id);
+    let complete_dir = state.paths.slot_completion_dir(&slot.infos, open_sync.id);
 
     for (relative_path, (id, _)) in &open_sync.files {
         let marker_path = complete_dir.join(id);
@@ -360,7 +366,7 @@ pub async fn finalize_sync(
             .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
     }
 
-    fs::remove_dir(state.paths.slot_pending_dir(&slot.infos, &open_sync.id))
+    fs::remove_dir(state.paths.slot_pending_dir(&slot.infos, open_sync.id))
         .await
         .context("Failed to remove the pending transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
@@ -370,7 +376,7 @@ pub async fn finalize_sync(
         .context("Failed to remove the complete transfers directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
 
-    fs::remove_dir(state.paths.slot_transfer_dir(&slot.infos, &open_sync.id))
+    fs::remove_dir(state.paths.slot_transfer_dir(&slot.infos, open_sync.id))
         .await
         .context("Failed to remove the slot directory")
         .map_err(handle_err!(INTERNAL_SERVER_ERROR))?;
@@ -381,9 +387,10 @@ pub async fn finalize_sync(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SendFileParams {
     slot_name: String,
-    sync_id: String,
+    sync_token: String,
     path: String,
 }
 
@@ -394,13 +401,13 @@ pub async fn send_file(
 ) -> HttpResult<Json<()>> {
     let SendFileParams {
         slot_name,
-        sync_id,
+        sync_token,
         path,
     } = params;
 
     // This block contains quick, locking computing
     // After this block we can do the actual transfer without worrying about locking a concurrent request
-    let (tmp_path, file_id, metadata, slot_infos) = {
+    let (tmp_path, sync_id, file_id, metadata, slot_infos) = {
         let slot = state
             .slots
             .get(&slot_name)
@@ -415,7 +422,7 @@ pub async fn send_file(
             .context("No synchronization is currently open for this slot")
             .map_err(handle_err!(NOT_FOUND))?;
 
-        if open_sync.token != sync_id {
+        if open_sync.token != sync_token {
             throw_err!(
                 BAD_REQUEST,
                 "Provided synchronization token does not match currently open sync."
@@ -430,10 +437,16 @@ pub async fn send_file(
 
         let tmp_path = state
             .paths
-            .slot_pending_dir(&slot.infos, &sync_id)
+            .slot_pending_dir(&slot.infos, open_sync.id)
             .join(file_id);
 
-        (tmp_path, file_id.clone(), *metadata, slot.infos.clone())
+        (
+            tmp_path,
+            open_sync.id,
+            file_id.clone(),
+            *metadata,
+            slot.infos.clone(),
+        )
     };
 
     if tmp_path.is_file() {
@@ -507,10 +520,10 @@ pub async fn send_file(
 
     let marker_path = &state
         .paths
-        .slot_completion_dir(&slot_infos, &sync_id)
+        .slot_completion_dir(&slot_infos, sync_id)
         .join(&file_id);
 
-    fs::rename(&tmp_path, &marker_path)
+    fs::write(&marker_path, "")
         .await
         .with_context(|| {
             format!(

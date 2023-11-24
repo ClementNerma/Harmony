@@ -32,16 +32,16 @@ impl Paths {
             .unwrap_or_else(|| self.slot_root_dir(slot).join("content"))
     }
 
-    pub fn slot_transfer_dir(&self, slot: &SlotInfos, sync_id: &str) -> PathBuf {
+    pub fn slot_transfer_dir(&self, slot: &SlotInfos, SyncId(sync_id): SyncId) -> PathBuf {
         self.slot_root_dir(slot)
-            .join(format!("open-sync-{sync_id}"))
+            .join(format!("open-sync-{sync_id:x}"))
     }
 
-    pub fn slot_completion_dir(&self, slot: &SlotInfos, sync_id: &str) -> PathBuf {
+    pub fn slot_completion_dir(&self, slot: &SlotInfos, sync_id: SyncId) -> PathBuf {
         self.slot_transfer_dir(slot, sync_id).join("complete")
     }
 
-    pub fn slot_pending_dir(&self, slot: &SlotInfos, sync_id: &str) -> PathBuf {
+    pub fn slot_pending_dir(&self, slot: &SlotInfos, sync_id: SyncId) -> PathBuf {
         self.slot_transfer_dir(slot, sync_id).join("pending")
     }
 }
@@ -112,6 +112,9 @@ impl FromStr for SlotInfos {
         Self::parse(input)
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct SyncId(pub u64);
 
 static FORBIDDEN_CHARS: &[char] = &[
     '/', '\\', '<', '>', ':', '"', '|', '?', '*', '\r', '\n', '\x00',
